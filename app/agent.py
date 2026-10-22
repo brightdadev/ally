@@ -1,5 +1,5 @@
 """
-LLM Agent integration powered by Google GenAI with real-time queue streaming.
+LLM Agent integration with unmasked error reporting and clean turn recovery.
 Author: Bright da dev
 """
 import asyncio
@@ -16,14 +16,6 @@ from context.memory import read_memory
 
 WRITE_TOOLS = {"write_file", "patch_file", "delete_file"}
 _PERSISTENT_CLIENT = None
-
-
-class QuotaException(Exception):
-    pass
-
-
-class ServerUnavailableException(Exception):
-    pass
 
 
 def get_client() -> genai.Client:
@@ -135,16 +127,15 @@ def dispatch(name: str, args: dict):
     return f"ERROR: unknown tool '{name}'"
 
 
-async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_status=None):
+async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step=None):
     """
-    True real-time streaming using an asynchronous threadsafe queue.
-    Tokens are dispatched immediately as received from Google.
+    Executes a turn and yields raw, unfiltered exceptions if Google fails.
     """
     current_input = user_text_or_parts
 
     while True:
-        if on_status:
-            on_status("thinking")
+        if on_step:
+            on_step(f"Calling {STATE.model}...")
 
         queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -167,46 +158,56 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_stat
             msg_type, payload = await queue.get()
 
             if msg_type == "error":
-                err = str(payload).lower()
-                if "503" in err or "unavailable" in err:
-                    raise ServerUnavailableException(str(payload))
-                if "429" in err or "quota" in err or "rate limit" in err:
-                    raise QuotaException(str(payload))
+                # DO NOT MASK: Raise raw exception directly to caller
                 raise payload
             elif msg_type == "done":
                 break
             elif msg_type == "chunk":
                 chunk = payload
-                if is_first_token:
-                    is_first_token = False
-                    if on_status:
-                        on_status("streaming")
-                text = chunk.text
+                text = ""
+                try:
+                    text = chunk.text or ""
+                except Exception:
+                    text = ""
+
                 if text:
+                    if is_first_token:
+                        is_first_token = False
+                        if on_step:
+                            on_step("Streaming response...")
                     on_token(text)
+
                 if chunk.function_calls:
                     accumulated_calls.extend(chunk.function_calls)
 
         if not accumulated_calls:
             break
 
-        if on_status:
-            on_status("executing")
-
         parts = []
         for call in accumulated_calls:
             name = call.name
             args = dict(call.args or {})
 
+            if on_step:
+                on_step(f"Tool request: {name}")
+
             if STATE.mode == "plan" and name in WRITE_TOOLS:
-                result = "BLOCKED: plan mode - read tools only. Explain your architectural plan instead."
+                result = "BLOCKED: plan mode - read tools only."
             elif STATE.mode == "accept" and name in WRITE_TOOLS:
+                if on_step:
+                    on_step(f"Awaiting approval for {name}...")
                 approved = await request_approval(name, args)
                 if approved:
+                    if on_step:
+                        on_step(f"Executing {name}...")
                     result = await asyncio.to_thread(dispatch, name, args)
                 else:
+                    if on_step:
+                        on_step(f"Denied: {name}")
                     result = "DENIED by user."
             else:
+                if on_step:
+                    on_step(f"Executing: {name}...")
                 result = await asyncio.to_thread(dispatch, name, args)
 
             parts.append(
@@ -215,5 +216,5 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_stat
 
         current_input = parts
 
-    if on_status:
-        on_status("ready")
+    if on_step:
+        on_step("Turn completed.")

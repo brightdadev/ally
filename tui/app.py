@@ -1,9 +1,10 @@
 """
-Terminal-Native IDE for Ally v1.0.2-nightly.
+Terminal-Native IDE for Ally v1.0.3-nightly.
 Author: Bright da dev
 """
 import asyncio
 import os
+from datetime import datetime
 from pathlib import Path
 
 try:
@@ -11,6 +12,9 @@ try:
     load_dotenv()
 except ImportError:
     pass
+
+from rich.markdown import Markdown
+from rich.panel import Panel
 
 from textual.app import App, ComposeResult
 from textual.widgets import (
@@ -27,6 +31,60 @@ from user.onboarding import profile_exists, load_profile
 from tui.screens import OnboardingModal, ProjectPrepModal, ModelSelectModal, ApiKeyModal
 
 
+def format_clean_error(err: Exception, current_model: str) -> Panel:
+    """Parses raw Google API errors into clean, compact, actionable TUI cards."""
+    err_str = str(err)
+    err_lower = err_str.lower()
+
+    # 1. Quota / Rate-limit (429)
+    if "429" in err_str or "resource_exhausted" in err_lower:
+        limit_note = ""
+        if "limit: 20" in err_str:
+            limit_note = " (20 requests/day free-tier limit)"
+        elif "limit:" in err_str:
+            try:
+                val = err_str.split("limit:")[1].split(",")[0].strip()
+                limit_note = f" (limit: {val})"
+            except Exception:
+                pass
+
+        body = (
+            f"[bold red]Quota Limit Reached for {current_model}[/]{limit_note}\n\n"
+            f"[dim yellow]Action:[/] Press [bold cyan]F2[/] to switch to [bold green]gemini-3.7-flash[/] or another model."
+        )
+        return Panel(body, title="[bold red]API Quota (429)[/]", border_style="red", padding=(1, 2))
+
+    # 2. Server Overloaded (503)
+    if "503" in err_str or "unavailable" in err_lower:
+        body = (
+            f"[bold red]Google Servers Overloaded (503)[/]\n\n"
+            f"Model [bold]{current_model}[/] is currently experiencing high demand on Google's side.\n"
+            f"[dim yellow]Action:[/] Retry in a few seconds or press [bold cyan]F2[/] to switch models."
+        )
+        return Panel(body, title="[bold red]Service Unavailable (503)[/]", border_style="red", padding=(1, 2))
+
+    # 3. Connection drop (10053)
+    if "10053" in err_str:
+        body = (
+            "[bold yellow]Connection Reset by Host[/]\n\n"
+            "The local socket connection dropped. Session has been automatically reconnected."
+        )
+        return Panel(body, title="[bold yellow]Network Reset[/]", border_style="yellow", padding=(1, 2))
+
+    # 4. Clean summary for any other API error
+    clean_msg = err_str
+    if "'message':" in err_str:
+        try:
+            clean_msg = err_str.split("'message':")[1].split("',")[0].strip(" '\"")
+        except Exception:
+            clean_msg = err_str[:140]
+    else:
+        clean_msg = err_str[:140]
+
+    body = f"[bold red]API Notice:[/] {clean_msg}"
+    return Panel(body, title="[bold red]Execution Notice[/]", border_style="red", padding=(1, 2))
+
+
 class WorkspaceTree(DirectoryTree):
     def filter_paths(self, paths):
         ignored = {".git", "__pycache__", ".venv", "venv", ".egg-info", "dist", "build"}
@@ -34,6 +92,9 @@ class WorkspaceTree(DirectoryTree):
 
 
 class AllyApp(App):
+    TITLE = "Ally"
+    SUB_TITLE = "Terminal IDE v1.0.3-nightly"
+
     CSS = """
     Screen {
         layout: vertical;
@@ -44,14 +105,22 @@ class AllyApp(App):
         layout: horizontal;
     }
     #sidebar {
-        width: 32;
+        width: 28;
         background: #141b24;
         border-right: solid #2a3749;
     }
     #sidebar.hidden {
         display: none;
     }
-    #sidebar-header {
+    #process-panel {
+        width: 38;
+        background: #141b24;
+        border-left: solid #2a3749;
+    }
+    #process-panel.hidden {
+        display: none;
+    }
+    .panel-header {
         height: 2;
         background: #1c2633;
         color: #00d2ff;
@@ -63,6 +132,12 @@ class AllyApp(App):
         height: 1fr;
         background: transparent;
         padding: 0 1;
+    }
+    #process-log {
+        height: 1fr;
+        background: transparent;
+        padding: 0 1;
+        color: #8b9bb4;
     }
     #main-panel {
         width: 1fr;
@@ -104,7 +179,8 @@ class AllyApp(App):
         Binding("f1", "show_help", "Help", priority=True),
         Binding("f2", "switch_model", "Model Select", priority=True),
         Binding("f3", "open_prep", "Project Prep", priority=True),
-        Binding("ctrl+b", "toggle_sidebar", "Toggle Explorer", priority=True),
+        Binding("ctrl+b", "toggle_sidebar", "Explorer", priority=True),
+        Binding("ctrl+p", "toggle_process", "Process Box", priority=True),
         Binding("ctrl+k", "open_api_key", "API Key"),
         Binding("ctrl+o", "open_onboarding", "Profile"),
         Binding("ctrl+q", "quit", "Quit", priority=True),
@@ -120,7 +196,7 @@ class AllyApp(App):
         yield Header(show_clock=True)
         yield Horizontal(
             Vertical(
-                Label("PROJECT EXPLORER", id="sidebar-header"),
+                Label("PROJECT EXPLORER", classes="panel-header"),
                 WorkspaceTree(str(STATE.root), id="file-tree"),
                 id="sidebar",
             ),
@@ -135,10 +211,15 @@ class AllyApp(App):
                 ),
                 RichLog(id="log", wrap=True, markup=True),
                 Vertical(
-                    Input(placeholder="Type prompt or command (/help, /prep, /key)... [F2: Model, Ctrl+B: Explorer]", id="prompt"),
+                    Input(placeholder="Type prompt or command (/help, /prep, /key)... [F2: Model, Ctrl+B: Explorer, Ctrl+P: Process]", id="prompt"),
                     id="prompt-container",
                 ),
                 id="main-panel",
+            ),
+            Vertical(
+                Label("PROCESS MONITOR", classes="panel-header"),
+                RichLog(id="process-log", wrap=True, markup=True),
+                id="process-panel",
             ),
             id="ide-layout",
         )
@@ -153,11 +234,13 @@ class AllyApp(App):
             if prof.default_model in ROUTER.list_models():
                 STATE.model = prof.default_model
             else:
-                STATE.model = ROUTER.get_default_model()
+                STATE.model = "gemini-3.7-flash"
             STATE.mode = prof.default_mode
             if prof.global_api_key and not os.environ.get("GEMINI_API_KEY"):
                 os.environ["GEMINI_API_KEY"] = prof.global_api_key
             self._refresh_status()
+
+        self._log_process("System booted. Ready.")
 
         if not os.environ.get("GEMINI_API_KEY"):
             self.action_open_api_key()
@@ -172,11 +255,13 @@ class AllyApp(App):
         try:
             agent.reset_client()
             self.chat = agent.new_chat()
-            log.write(f"[bold green]Ally Terminal IDE v1.0.2-nightly Online.[/] [dim]Engine by Bright da dev[/dim]")
+            log.write(f"[bold green]Ally Terminal IDE v1.0.3-nightly Online.[/] [dim]Engine by Bright da dev[/dim]")
             log.write(f"[cyan]Model:[/] [bold]{STATE.model}[/] | [yellow]Mode:[/] [bold]{STATE.mode}[/] | [bold]Root:[/] {STATE.root.name}")
-            log.write("[dim]Shortcuts: [bold]F2[/]: Select Model | [bold]F3[/]: Project Prep | [bold]Ctrl+K[/]: Set API Key | [bold]Ctrl+B[/]: Explorer[/dim]\n")
+            log.write("[dim]Shortcuts: [bold]F2[/]: Model Select | [bold]F3[/]: Project Prep | [bold]Ctrl+P[/]: Process Box | [bold]Ctrl+B[/]: Explorer[/dim]\n")
+            self._log_process(f"Session active: {STATE.model}")
         except Exception as e:
-            log.write(f"[red]Chat init error: {e}[/]")
+            log.write(format_clean_error(e, STATE.model))
+            self._log_process(f"[red]Boot error[/]")
 
     def _refresh_status(self):
         self.query_one("#badge-user", Static).update(f"[cyan]User:[/] {STATE.username}")
@@ -195,15 +280,24 @@ class AllyApp(App):
         else:
             badge.update("[bold green]● READY[/]")
 
+    def _log_process(self, message: str):
+        plog = self.query_one("#process-log", RichLog)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        clean_msg = message[:30] + ("..." if len(message) > 30 else "")
+        plog.write(f"[dim]{timestamp}[/] {clean_msg}")
+
     def action_toggle_sidebar(self):
-        sidebar = self.query_one("#sidebar")
-        sidebar.toggle_class("hidden")
+        self.query_one("#sidebar").toggle_class("hidden")
+
+    def action_toggle_process(self):
+        self.query_one("#process-panel").toggle_class("hidden")
 
     def action_open_api_key(self):
         def _on_key_set(saved: bool):
             if saved:
                 log = self.query_one("#log", RichLog)
-                log.write("[bold green]GEMINI_API_KEY configured successfully.[/]")
+                log.write("[bold green]GEMINI_API_KEY saved successfully.[/]")
+                self._log_process("API Key updated.")
                 self._boot()
         self.push_screen(ApiKeyModal(), _on_key_set)
 
@@ -213,6 +307,7 @@ class AllyApp(App):
                 STATE.model = new_model
                 self._refresh_status()
                 self._reset_chat(f"Active model set to {new_model}.")
+                self._log_process(f"Switched to {new_model}")
         self.push_screen(ModelSelectModal(STATE.model, is_quota_alert=False), _on_switched)
 
     def action_open_prep(self):
@@ -222,6 +317,7 @@ class AllyApp(App):
                 self._reset_chat("Project brief and memory initialized.")
                 tree = self.query_one("#file-tree", WorkspaceTree)
                 tree.reload()
+                self._log_process("Project prep executed.")
         self.push_screen(ProjectPrepModal(), _on_closed)
 
     def action_open_onboarding(self):
@@ -229,6 +325,7 @@ class AllyApp(App):
             if saved:
                 self._refresh_status()
                 self._reset_chat("Profile preferences applied.")
+                self._log_process("Profile saved.")
         self.push_screen(OnboardingModal(), _on_closed)
 
     def action_show_help(self):
@@ -238,8 +335,9 @@ class AllyApp(App):
             "  [bold]F1[/]              Display command guide\n"
             "  [bold]F2[/]              Open Model Selection\n"
             "  [bold]F3[/]              Open Project Prep Wizard\n"
-            "  [bold]Ctrl+K[/]          Configure GEMINI_API_KEY\n"
             "  [bold]Ctrl+B[/]          Toggle Project Explorer Sidebar\n"
+            "  [bold]Ctrl+P[/]          Toggle Process & Trace Box\n"
+            "  [bold]Ctrl+K[/]          Configure GEMINI_API_KEY\n"
             "  [bold]Ctrl+O[/]          Edit Developer Profile\n"
             "  [bold]Ctrl+Q[/]          Quit Ally\n"
             "  /key              Set Gemini API key\n"
@@ -265,7 +363,7 @@ class AllyApp(App):
             if msg:
                 log.write(f"[green]{msg}[/]")
         except Exception as e:
-            log.write(f"[red]Chat reset failed: {e}[/]")
+            log.write(format_clean_error(e, STATE.model))
 
     async def request_approval(self, name: str, args: dict) -> bool:
         log = self.query_one("#log", RichLog)
@@ -273,11 +371,15 @@ class AllyApp(App):
         if name == "write_file":
             body = args.get("content", "")
             preview = body[:600] + ("\n... (truncated)" if len(body) > 600 else "")
-            log.write(f"[yellow bold]WRITE:[/] {path}\n[dim]{preview}[/]")
+            panel = Panel(preview, title=f"[bold yellow]WRITE:[/] {path}", border_style="yellow")
+            log.write(panel)
         elif name == "patch_file":
-            log.write(f"[yellow bold]PATCH:[/] {path}\n[dim]--- OLD ---\n{args.get('old','')[:300]}\n--- NEW ---\n{args.get('new','')[:300]}[/]")
+            preview = f"--- OLD ---\n{args.get('old','')[:250]}\n--- NEW ---\n{args.get('new','')[:250]}"
+            panel = Panel(preview, title=f"[bold yellow]PATCH:[/] {path}", border_style="yellow")
+            log.write(panel)
         elif name == "delete_file":
-            log.write(f"[red bold]DELETE:[/] {path}")
+            panel = Panel(f"Delete file: {path}", title="[bold red]DELETE[/]", border_style="red")
+            log.write(panel)
         else:
             log.write(f"[yellow bold]{name}:[/] {args}")
 
@@ -314,21 +416,18 @@ class AllyApp(App):
     async def _execute_turn_worker(self, text: str):
         log = self.query_one("#log", RichLog)
         log.write(f"\n[bold cyan]{STATE.username}:[/] {text}")
-        
-        # INLINE CHATTING INDICATOR (directly where the user looks)
-        log.write("[bold green]Ally:[/] [dim yellow]⠋ Thinking...[/]")
+        self._log_process(f"Prompt: '{text[:20]}...'")
 
         self._busy = True
         self._set_activity("thinking")
 
         buffer = []
-        is_first_chunk = True
 
         def _on_token(chunk: str):
-            nonlocal is_first_chunk
-            if is_first_chunk:
-                is_first_chunk = False
             buffer.append(chunk)
+
+        def _on_step(step_name: str):
+            self._log_process(step_name)
 
         try:
             await agent.run_turn(
@@ -336,27 +435,32 @@ class AllyApp(App):
                 text,
                 _on_token,
                 self.request_approval,
-                on_status=self._set_activity,
+                on_step=_on_step,
             )
-            # Output full accumulated response smoothly
             full_reply = "".join(buffer)
             if full_reply:
-                log.write(full_reply)
+                md_rendered = Markdown(full_reply)
+                panel = Panel(
+                    md_rendered,
+                    title=f"[bold green]Ally ({STATE.model})[/]",
+                    border_style="cyan",
+                    padding=(1, 2),
+                )
+                log.write(panel)
             tree = self.query_one("#file-tree", WorkspaceTree)
             tree.reload()
-        except agent.ServerUnavailableException:
-            log.write(f"[bold red][!] 503 Server Unavailable:[/] Model '{STATE.model}' is overloaded on Google's side.")
-            log.write("[bold yellow]Recommendation: Press F2 and switch to 'gemini-2.5-flash' for instant sub-300ms responses.[/]")
-        except agent.QuotaException:
-            log.write("[bold red][!] Quota / Rate-limit reached for current model.[/]")
-            def _on_switched(new_model: str):
-                if new_model:
-                    STATE.model = new_model
-                    self._refresh_status()
-                    self._reset_chat(f"Switched model to {new_model}.")
-            self.push_screen(ModelSelectModal(STATE.model, is_quota_alert=True), _on_switched)
         except Exception as e:
-            log.write(f"[red]Execution error: {e}[/]")
+            # CLEAN, HUMAN-READABLE ERROR CARD (Zero raw JSON RPC dumps)
+            error_card = format_clean_error(e, STATE.model)
+            log.write(error_card)
+            self._log_process("[red]Execution notice[/]")
+
+            # Auto-heal session to prevent consecutive user turn desync
+            try:
+                agent.reset_client()
+                self.chat = agent.new_chat()
+            except Exception:
+                pass
         finally:
             self._busy = False
             self._set_activity("ready")
