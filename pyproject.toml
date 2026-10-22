@@ -14,11 +14,11 @@ dependencies = [
 ]
 
 [project.scripts]
-ally = "app.main:run"
+ally = "tui.app:run"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["app", "app.model", "user", "context", "context.skills"]
+packages = ["app", "app.model", "user", "context", "context.skills", "tui", "tui.screens"]
