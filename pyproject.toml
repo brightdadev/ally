@@ -1,6 +1,6 @@
 [project]
 name = "ally"
-version = "0.1.0"
+version = "0.1.2"
 description = "Terminal coding agent powered by Gemini"
 authors = [
     { name = "Bright da dev" }
@@ -21,4 +21,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["agent", "main", "state", "tools"]
+py-modules = ["agent", "main", "state", "tools", "__init__"]

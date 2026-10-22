@@ -1,7 +1,7 @@
 # Ally - Terminal Coding Agent
 
 Author: Bright da dev
-Version: 0.1.0
+Version: 0.1.2
 License: MIT
 
 Ally is an interactive Terminal User Interface (TUI) coding assistant powered by Google Gemini. It operates directly inside your workspace with sandboxed filesystem execution, structured approval modes, and real-time streaming feedback.
