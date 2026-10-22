@@ -1,0 +1,24 @@
+[project]
+name = "ally"
+version = "0.1.0"
+description = "Terminal coding agent powered by Gemini"
+authors = [
+    { name = "Bright da dev" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "google-genai",
+    "textual",
+    "rich",
+    "python-dotenv",
+]
+
+[project.scripts]
+ally = "main:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["agent", "main", "state", "tools"]
