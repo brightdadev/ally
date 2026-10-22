@@ -10,7 +10,7 @@
     {
       "id": "gemini-3.8-flash",
       "name": "Gemini 3.8 Flash",
-      "description": "High-throughput coding model optimized for tool calling",
+      "description": "High-throughput, ultra-responsive next-gen coding model",
       "tier": "performance"
     },
     {
@@ -22,7 +22,7 @@
     {
       "id": "gemini-3.1-pro-preview",
       "name": "Gemini 3.1 Pro Preview",
-      "description": "Preview model for deep context analysis and planning",
+      "description": "Deep context reasoning and architecture planning",
       "tier": "preview"
     }
   ]

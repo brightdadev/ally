@@ -1,5 +1,5 @@
 """
-LLM Agent integration powered by Google GenAI.
+LLM Agent integration powered by Google GenAI with real-time queue streaming.
 Author: Bright da dev
 """
 import asyncio
@@ -22,8 +22,11 @@ class QuotaException(Exception):
     pass
 
 
+class ServerUnavailableException(Exception):
+    pass
+
+
 def get_client() -> genai.Client:
-    """Maintains a persistent genai.Client instance so the HTTP transport is never prematurely closed."""
     global _PERSISTENT_CLIENT
     api_key = os.environ.get("GEMINI_API_KEY")
     if _PERSISTENT_CLIENT is None:
@@ -32,7 +35,6 @@ def get_client() -> genai.Client:
 
 
 def reset_client():
-    """Resets the client when API key or workspace environment changes."""
     global _PERSISTENT_CLIENT
     _PERSISTENT_CLIENT = None
 
@@ -105,7 +107,6 @@ def _compile_tool_definitions():
 
 
 def new_chat():
-    """Initializes chat session using the persistent client connection."""
     client = get_client()
     return client.chats.create(
         model=STATE.model,
@@ -114,19 +115,6 @@ def new_chat():
             system_instruction=_system_prompt(),
         ),
     )
-
-
-def _get_text(response) -> str:
-    try:
-        t = response.text
-        return t or ""
-    except Exception:
-        out = []
-        for c in response.candidates or []:
-            for p in c.content.parts or []:
-                if getattr(p, "text", None):
-                    out.append(p.text)
-        return "".join(out)
 
 
 def dispatch(name: str, args: dict):
@@ -147,26 +135,66 @@ def dispatch(name: str, args: dict):
     return f"ERROR: unknown tool '{name}'"
 
 
-async def run_turn(chat, user_text: str, log, request_approval):
-    try:
-        response = await asyncio.to_thread(chat.send_message, user_text)
-    except Exception as e:
-        err_str = str(e).lower()
-        if "429" in err_str or "quota" in err_str or "rate limit" in err_str:
-            raise QuotaException(str(e))
-        raise e
+async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_status=None):
+    """
+    True real-time streaming using an asynchronous threadsafe queue.
+    Tokens are dispatched immediately as received from Google.
+    """
+    current_input = user_text_or_parts
 
     while True:
-        text = _get_text(response)
-        if text:
-            log(text)
+        if on_status:
+            on_status("thinking")
 
-        calls = response.function_calls or []
-        if not calls:
+        queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _producer():
+            try:
+                for chunk in chat.send_message_stream(current_input):
+                    loop.call_soon_threadsafe(queue.put_nowait, ("chunk", chunk))
+            except Exception as e:
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", e))
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+
+        asyncio.create_task(asyncio.to_thread(_producer))
+
+        accumulated_calls = []
+        is_first_token = True
+
+        while True:
+            msg_type, payload = await queue.get()
+
+            if msg_type == "error":
+                err = str(payload).lower()
+                if "503" in err or "unavailable" in err:
+                    raise ServerUnavailableException(str(payload))
+                if "429" in err or "quota" in err or "rate limit" in err:
+                    raise QuotaException(str(payload))
+                raise payload
+            elif msg_type == "done":
+                break
+            elif msg_type == "chunk":
+                chunk = payload
+                if is_first_token:
+                    is_first_token = False
+                    if on_status:
+                        on_status("streaming")
+                text = chunk.text
+                if text:
+                    on_token(text)
+                if chunk.function_calls:
+                    accumulated_calls.extend(chunk.function_calls)
+
+        if not accumulated_calls:
             break
 
+        if on_status:
+            on_status("executing")
+
         parts = []
-        for call in calls:
+        for call in accumulated_calls:
             name = call.name
             args = dict(call.args or {})
 
@@ -185,12 +213,7 @@ async def run_turn(chat, user_text: str, log, request_approval):
                 types.Part.from_function_response(name=name, response={"result": result})
             )
 
-        try:
-            response = await asyncio.to_thread(chat.send_message, parts)
-        except Exception as e:
-            err_str = str(e).lower()
-            if "429" in err_str or "quota" in err_str or "rate limit" in err_str:
-                raise QuotaException(str(e))
-            raise e
+        current_input = parts
 
-    return response
+    if on_status:
+        on_status("ready")

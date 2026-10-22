@@ -1,5 +1,5 @@
 """
-Terminal-Native IDE for Ally.
+Terminal-Native IDE for Ally v1.0.2-nightly.
 Author: Bright da dev
 """
 import asyncio
@@ -18,6 +18,7 @@ from textual.widgets import (
 )
 from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
+from textual import work
 
 from app import agent
 from app.state import STATE
@@ -78,6 +79,9 @@ class AllyApp(App):
         margin-right: 2;
         text-style: bold;
     }
+    #badge-status {
+        color: #00ff88;
+    }
     #log {
         height: 1fr;
         background: #0d1117;
@@ -122,6 +126,7 @@ class AllyApp(App):
             ),
             Vertical(
                 Horizontal(
+                    Static("[bold green]● READY[/]", id="badge-status", classes="badge"),
                     Static(f"[cyan]User:[/] {STATE.username}", id="badge-user", classes="badge"),
                     Static(f"[green]Model (F2):[/] {STATE.model}", id="badge-model", classes="badge"),
                     Static(f"[yellow]Mode:[/] {STATE.mode.upper()}", id="badge-mode", classes="badge"),
@@ -145,7 +150,10 @@ class AllyApp(App):
         if profile_exists():
             prof = load_profile()
             STATE.username = prof.username
-            STATE.model = prof.default_model
+            if prof.default_model in ROUTER.list_models():
+                STATE.model = prof.default_model
+            else:
+                STATE.model = ROUTER.get_default_model()
             STATE.mode = prof.default_mode
             if prof.global_api_key and not os.environ.get("GEMINI_API_KEY"):
                 os.environ["GEMINI_API_KEY"] = prof.global_api_key
@@ -164,7 +172,7 @@ class AllyApp(App):
         try:
             agent.reset_client()
             self.chat = agent.new_chat()
-            log.write(f"[bold green]Ally Terminal IDE v1.0.1 Online.[/] [dim]Engine by Bright da dev[/dim]")
+            log.write(f"[bold green]Ally Terminal IDE v1.0.2-nightly Online.[/] [dim]Engine by Bright da dev[/dim]")
             log.write(f"[cyan]Model:[/] [bold]{STATE.model}[/] | [yellow]Mode:[/] [bold]{STATE.mode}[/] | [bold]Root:[/] {STATE.root.name}")
             log.write("[dim]Shortcuts: [bold]F2[/]: Select Model | [bold]F3[/]: Project Prep | [bold]Ctrl+K[/]: Set API Key | [bold]Ctrl+B[/]: Explorer[/dim]\n")
         except Exception as e:
@@ -175,6 +183,17 @@ class AllyApp(App):
         self.query_one("#badge-model", Static).update(f"[green]Model (F2):[/] {STATE.model}")
         self.query_one("#badge-mode", Static).update(f"[yellow]Mode:[/] {STATE.mode.upper()}")
         self.query_one("#badge-root", Static).update(f"[dim]Root:[/] {STATE.root.name}")
+
+    def _set_activity(self, state: str):
+        badge = self.query_one("#badge-status", Static)
+        if state == "thinking":
+            badge.update("[bold magenta]⠋ THINKING...[/]")
+        elif state == "streaming":
+            badge.update("[bold cyan]● STREAMING...[/]")
+        elif state == "executing":
+            badge.update("[bold yellow]⚙ EXECUTING...[/]")
+        else:
+            badge.update("[bold green]● READY[/]")
 
     def action_toggle_sidebar(self):
         sidebar = self.query_one("#sidebar")
@@ -276,31 +295,58 @@ class AllyApp(App):
             self._approval_future.set_result(text.lower() in ("y", "yes"))
             return
 
-        log = self.query_one("#log", RichLog)
-
         if text.startswith("/"):
+            log = self.query_one("#log", RichLog)
             self._handle_command(text, log)
             return
 
         if self.chat is None:
-            log.write("[red]Ally not initialized. Press Ctrl+K to enter your GEMINI_API_KEY.[/]")
+            self.query_one("#log", RichLog).write("[red]Ally not initialized. Press Ctrl+K to enter GEMINI_API_KEY.[/]")
             return
 
         if self._busy:
-            log.write("[yellow]Ally is currently executing. Please wait...[/]")
+            self.query_one("#log", RichLog).write("[yellow]Ally is busy. Wait for current turn to complete.[/]")
             return
 
-        log.write(f"\n[bold cyan]{STATE.username}:[/] {text}")
-        log.write("[bold green]Ally:[/]")
+        self._execute_turn_worker(text)
 
-        def _stream(chunk: str):
-            log.write(chunk)
+    @work(exclusive=True)
+    async def _execute_turn_worker(self, text: str):
+        log = self.query_one("#log", RichLog)
+        log.write(f"\n[bold cyan]{STATE.username}:[/] {text}")
+        
+        # INLINE CHATTING INDICATOR (directly where the user looks)
+        log.write("[bold green]Ally:[/] [dim yellow]⠋ Thinking...[/]")
 
         self._busy = True
+        self._set_activity("thinking")
+
+        buffer = []
+        is_first_chunk = True
+
+        def _on_token(chunk: str):
+            nonlocal is_first_chunk
+            if is_first_chunk:
+                is_first_chunk = False
+            buffer.append(chunk)
+
         try:
-            await agent.run_turn(self.chat, text, _stream, self.request_approval)
+            await agent.run_turn(
+                self.chat,
+                text,
+                _on_token,
+                self.request_approval,
+                on_status=self._set_activity,
+            )
+            # Output full accumulated response smoothly
+            full_reply = "".join(buffer)
+            if full_reply:
+                log.write(full_reply)
             tree = self.query_one("#file-tree", WorkspaceTree)
             tree.reload()
+        except agent.ServerUnavailableException:
+            log.write(f"[bold red][!] 503 Server Unavailable:[/] Model '{STATE.model}' is overloaded on Google's side.")
+            log.write("[bold yellow]Recommendation: Press F2 and switch to 'gemini-2.5-flash' for instant sub-300ms responses.[/]")
         except agent.QuotaException:
             log.write("[bold red][!] Quota / Rate-limit reached for current model.[/]")
             def _on_switched(new_model: str):
@@ -313,6 +359,7 @@ class AllyApp(App):
             log.write(f"[red]Execution error: {e}[/]")
         finally:
             self._busy = False
+            self._set_activity("ready")
 
     def _handle_command(self, text: str, log: RichLog):
         parts = text.split(maxsplit=1)
