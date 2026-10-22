@@ -28,7 +28,7 @@ from app import agent
 from app.state import STATE
 from app.model.router import ROUTER
 from user.onboarding import profile_exists, load_profile
-from tui.screens import OnboardingModal, ProjectPrepModal, ModelSelectModal, ApiKeyModal
+from tui.screens import OnboardingModal, ProjectPrepModal, ModelSelectModal, ApiKeyModal, TokenUsageModal
 
 
 def format_clean_error(err: Exception, current_model: str) -> Panel:
@@ -179,6 +179,7 @@ class AllyApp(App):
         Binding("f1", "show_help", "Help", priority=True),
         Binding("f2", "switch_model", "Model Select", priority=True),
         Binding("f3", "open_prep", "Project Prep", priority=True),
+        Binding("f4", "open_usage", "Token Usage", priority=True),
         Binding("ctrl+b", "toggle_sidebar", "Explorer", priority=True),
         Binding("ctrl+p", "toggle_process", "Process Box", priority=True),
         Binding("ctrl+k", "open_api_key", "API Key"),
@@ -202,7 +203,7 @@ class AllyApp(App):
             ),
             Vertical(
                 Horizontal(
-                    Static("[bold green]● READY[/]", id="badge-status", classes="badge"),
+                    Static("[bold green]â— READY[/]", id="badge-status", classes="badge"),
                     Static(f"[cyan]User:[/] {STATE.username}", id="badge-user", classes="badge"),
                     Static(f"[green]Model (F2):[/] {STATE.model}", id="badge-model", classes="badge"),
                     Static(f"[yellow]Mode:[/] {STATE.mode.upper()}", id="badge-mode", classes="badge"),
@@ -272,13 +273,13 @@ class AllyApp(App):
     def _set_activity(self, state: str):
         badge = self.query_one("#badge-status", Static)
         if state == "thinking":
-            badge.update("[bold magenta]⠋ THINKING...[/]")
+            badge.update("[bold magenta]â ‹ THINKING...[/]")
         elif state == "streaming":
-            badge.update("[bold cyan]● STREAMING...[/]")
+            badge.update("[bold cyan]â— STREAMING...[/]")
         elif state == "executing":
-            badge.update("[bold yellow]⚙ EXECUTING...[/]")
+            badge.update("[bold yellow]âš™ EXECUTING...[/]")
         else:
-            badge.update("[bold green]● READY[/]")
+            badge.update("[bold green]â— READY[/]")
 
     def _log_process(self, message: str):
         plog = self.query_one("#process-log", RichLog)
@@ -310,6 +311,8 @@ class AllyApp(App):
                 self._log_process(f"Switched to {new_model}")
         self.push_screen(ModelSelectModal(STATE.model, is_quota_alert=False), _on_switched)
 
+        def action_open_usage(self):
+        self.push_screen(TokenUsageModal())
     def action_open_prep(self):
         def _on_closed(prepped: bool):
             if prepped:

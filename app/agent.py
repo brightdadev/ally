@@ -1,5 +1,5 @@
 """
-LLM Agent integration with unmasked error reporting and clean turn recovery.
+LLM Agent with dual-key rotation and token usage collection.
 Author: Bright da dev
 """
 import asyncio
@@ -12,15 +12,49 @@ from app.state import STATE
 from app import tools
 from context.skills import SKILLS
 from context.memory import read_memory
+from user.onboarding import load_profile, save_profile
 
 
 WRITE_TOOLS = {"write_file", "patch_file", "delete_file"}
 _PERSISTENT_CLIENT = None
 
 
+class QuotaException(Exception):
+    pass
+
+
+class ServerUnavailableException(Exception):
+    pass
+
+
+def get_active_key() -> str:
+    prof = load_profile()
+    if STATE.active_key_index == 2 and prof.api_key_2:
+        return prof.api_key_2
+    if prof.api_key_1:
+        return prof.api_key_1
+    return os.environ.get("GEMINI_API_KEY", "")
+
+
+def rotate_to_backup_key() -> bool:
+    """Rotates to secondary key if primary hits quota."""
+    prof = load_profile()
+    if STATE.active_key_index == 1 and prof.api_key_2:
+        STATE.active_key_index = 2
+        os.environ["GEMINI_API_KEY"] = prof.api_key_2
+        reset_client()
+        return True
+    elif STATE.active_key_index == 2 and prof.api_key_1:
+        STATE.active_key_index = 1
+        os.environ["GEMINI_API_KEY"] = prof.api_key_1
+        reset_client()
+        return True
+    return False
+
+
 def get_client() -> genai.Client:
     global _PERSISTENT_CLIENT
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = get_active_key()
     if _PERSISTENT_CLIENT is None:
         _PERSISTENT_CLIENT = genai.Client(api_key=api_key)
     return _PERSISTENT_CLIENT
@@ -44,7 +78,7 @@ def _load_ground_rules() -> str:
 def _system_prompt() -> str:
     parts = [
         _load_ground_rules(),
-        f"OPERATIONAL STATE:\n- User: {STATE.username}\n- Mode: {STATE.mode}\n- Model: {STATE.model}\n- Project Root: {STATE.root}",
+        f"OPERATIONAL STATE:\n- User: {STATE.username}\n- Mode: {STATE.mode}\n- Model: {STATE.model}\n- Active Key: #{STATE.active_key_index}\n- Project Root: {STATE.root}",
     ]
 
     brief_file = STATE.root / "project.md"
@@ -128,14 +162,11 @@ def dispatch(name: str, args: dict):
 
 
 async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step=None):
-    """
-    Executes a turn and yields raw, unfiltered exceptions if Google fails.
-    """
     current_input = user_text_or_parts
 
     while True:
         if on_step:
-            on_step(f"Calling {STATE.model}...")
+            on_step(f"Calling {STATE.model} (Key #{STATE.active_key_index})...")
 
         queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -158,7 +189,17 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
             msg_type, payload = await queue.get()
 
             if msg_type == "error":
-                # DO NOT MASK: Raise raw exception directly to caller
+                err = str(payload).lower()
+                # Check for quota error and attempt failover to Key 2
+                if ("429" in err or "quota" in err or "resource_exhausted" in err) and rotate_to_backup_key():
+                    if on_step:
+                        on_step(f"Quota hit. Auto-rotated to Key #{STATE.active_key_index}!")
+                    # Retry stream with backup key
+                    chat = new_chat()
+                    return await run_turn(chat, user_text_or_parts, on_token, request_approval, on_step)
+
+                if "503" in err or "unavailable" in err:
+                    raise ServerUnavailableException(str(payload))
                 raise payload
             elif msg_type == "done":
                 break
@@ -179,6 +220,14 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
 
                 if chunk.function_calls:
                     accumulated_calls.extend(chunk.function_calls)
+
+                # Collect usage metadata if reported by Gemini
+                if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                    u = chunk.usage_metadata
+                    p = getattr(u, "prompt_token_count", 0) or 0
+                    c = getattr(u, "candidates_token_count", 0) or 0
+                    t = getattr(u, "total_token_count", 0) or (p + c)
+                    STATE.tokens.add(p, c, t, STATE.active_key_index)
 
         if not accumulated_calls:
             break

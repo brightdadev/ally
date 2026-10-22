@@ -1,5 +1,5 @@
 """
-Global user onboarding and profile management for Ally.
+Global user onboarding and dual API key management for Ally.
 Author: Bright da dev
 """
 import json
@@ -13,9 +13,11 @@ PROFILE_FILE = CONFIG_DIR / "user_profile.json"
 @dataclass
 class UserProfile:
     username: str = "developer"
-    default_model: str = "gemini-2.5-flash"
+    default_model: str = "gemini-3.6-flash"
     default_mode: str = "accept"
-    global_api_key: str = ""
+    api_key_1: str = ""
+    api_key_2: str = ""
+    active_key_index: int = 1
 
 
 def get_profile_path() -> Path:
@@ -27,22 +29,25 @@ def profile_exists() -> bool:
 
 
 def load_profile() -> UserProfile:
-    """Load user profile from ~/.ally/user_profile.json or return defaults."""
     if not profile_exists():
         return UserProfile()
     try:
         data = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+        # Backwards compatibility check
+        k1 = data.get("api_key_1") or data.get("global_api_key", "")
+        k2 = data.get("api_key_2", "")
         return UserProfile(
             username=data.get("username", "developer"),
-            default_model=data.get("default_model", "gemini-2.5-flash"),
+            default_model=data.get("default_model", "gemini-3.6-flash"),
             default_mode=data.get("default_mode", "accept"),
-            global_api_key=data.get("global_api_key", ""),
+            api_key_1=k1,
+            api_key_2=k2,
+            active_key_index=data.get("active_key_index", 1),
         )
     except Exception:
         return UserProfile()
 
 
 def save_profile(profile: UserProfile) -> None:
-    """Persist user profile globally to ~/.ally/user_profile.json."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     PROFILE_FILE.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")

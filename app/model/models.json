@@ -1,11 +1,11 @@
 {
-  "default_model": "gemini-3.7-flash",
+  "default_model": "gemini-3.6-flash",
   "models": [
     {
-      "id": "gemini-4-argon",
-      "name": "Gemini 4 Argon",
-      "description": "Next-gen flagship model for heavy reasoning and architecture",
-      "tier": "flagship"
+      "id": "gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash (Primary)",
+      "description": "Standard daily-driver high-throughput coding model",
+      "tier": "standard"
     },
     {
       "id": "gemini-3.8-flash",
@@ -14,10 +14,10 @@
       "tier": "performance"
     },
     {
-      "id": "gemini-3.7-flash",
-      "name": "Gemini 3.7 Flash",
-      "description": "Balanced daily-driver coding assistant",
-      "tier": "standard"
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "description": "Next-gen flagship model for heavy reasoning and architecture",
+      "tier": "flagship"
     },
     {
       "id": "gemini-3.1-pro-preview",

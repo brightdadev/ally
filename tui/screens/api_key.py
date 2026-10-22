@@ -1,5 +1,5 @@
 """
-API Key Setup Modal for Ally.
+Dual API Key Configuration Modal for Ally.
 Author: Bright da dev
 """
 import os
@@ -19,7 +19,7 @@ class ApiKeyModal(ModalScreen[bool]):
         background: rgba(0, 0, 0, 0.7);
     }
     #api-dialog {
-        width: 68;
+        width: 70;
         height: auto;
         border: thick #00d2ff;
         background: #141b24;
@@ -46,34 +46,50 @@ class ApiKeyModal(ModalScreen[bool]):
     """
 
     def compose(self) -> ComposeResult:
+        prof = load_profile()
         yield Vertical(
-            Label("Gemini API Key Required", classes="title"),
-            Label("Get your free Gemini API key from: https://aistudio.google.com", classes="hint"),
-            Label("Paste your GEMINI_API_KEY below:", classes="field-label"),
-            Input(placeholder="AIzaSy...", password=True, id="input-api-key"),
+            Label("Dual Gemini API Key Management", classes="title"),
+            Label("Configure up to 2 keys. Key 2 acts as automatic quota failover.", classes="hint"),
+            Label("Primary API Key (Key 1 - Required):", classes="field-label"),
+            Input(value=prof.api_key_1, placeholder="AIzaSy... (Key 1)", password=True, id="input-key-1"),
+            Label("Backup API Key (Key 2 - Optional Quota Failover):", classes="field-label"),
+            Input(value=prof.api_key_2, placeholder="AIzaSy... (Key 2)", password=True, id="input-key-2"),
             Horizontal(
-                Button("Save & Start Ally", variant="primary", id="btn-save-key"),
+                Button("Save Keys & Continue", variant="primary", id="btn-save-keys"),
                 id="api-buttons",
             ),
             id="api-dialog",
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-save-key":
-            key = self.query_one("#input-api-key", Input).value.strip()
-            if not key:
+        if event.button.id == "btn-save-keys":
+            k1 = self.query_one("#input-key-1", Input).value.strip()
+            k2 = self.query_one("#input-key-2", Input).value.strip()
+
+            if not k1 and not k2:
                 return
 
-            # 1. Set in active runtime
-            os.environ["GEMINI_API_KEY"] = key
-
-            # 2. Write to local .env in project root
-            env_file = STATE.root / ".env"
-            env_file.write_text(f"GEMINI_API_KEY={key}\n", encoding="utf-8")
-
-            # 3. Save globally in user profile
             profile = load_profile()
-            profile.global_api_key = key
+            profile.api_key_1 = k1
+            profile.api_key_2 = k2
             save_profile(profile)
+
+            # Update active runtime env
+            if k1:
+                os.environ["GEMINI_API_KEY"] = k1
+                STATE.active_key_index = 1
+            elif k2:
+                os.environ["GEMINI_API_KEY"] = k2
+                STATE.active_key_index = 2
+
+            # Write to local .env
+            env_file = STATE.root / ".env"
+            env_lines = []
+            if k1:
+                env_lines.append(f"GEMINI_API_KEY_1={k1}")
+                env_lines.append(f"GEMINI_API_KEY={k1}")
+            if k2:
+                env_lines.append(f"GEMINI_API_KEY_2={k2}")
+            env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
 
             self.dismiss(True)
