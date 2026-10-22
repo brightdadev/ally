@@ -142,7 +142,6 @@ class AllyApp(App):
     def on_mount(self):
         self.query_one("#prompt").focus()
 
-        # 1. Load global profile if available
         if profile_exists():
             prof = load_profile()
             STATE.username = prof.username
@@ -152,7 +151,6 @@ class AllyApp(App):
                 os.environ["GEMINI_API_KEY"] = prof.global_api_key
             self._refresh_status()
 
-        # 2. Check for API key; if missing, launch ApiKeyModal immediately
         if not os.environ.get("GEMINI_API_KEY"):
             self.action_open_api_key()
         else:
@@ -164,6 +162,7 @@ class AllyApp(App):
             return
 
         try:
+            agent.reset_client()
             self.chat = agent.new_chat()
             log.write(f"[bold green]Ally Terminal IDE v1.0.1 Online.[/] [dim]Engine by Bright da dev[/dim]")
             log.write(f"[cyan]Model:[/] [bold]{STATE.model}[/] | [yellow]Mode:[/] [bold]{STATE.mode}[/] | [bold]Root:[/] {STATE.root.name}")
@@ -242,6 +241,7 @@ class AllyApp(App):
     def _reset_chat(self, msg: str = ""):
         log = self.query_one("#log", RichLog)
         try:
+            agent.reset_client()
             self.chat = agent.new_chat()
             if msg:
                 log.write(f"[green]{msg}[/]")

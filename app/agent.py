@@ -3,10 +3,10 @@ LLM Agent integration powered by Google GenAI.
 Author: Bright da dev
 """
 import asyncio
+import os
 from pathlib import Path
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
 
 from app.state import STATE
 from app import tools
@@ -15,11 +15,26 @@ from context.memory import read_memory
 
 
 WRITE_TOOLS = {"write_file", "patch_file", "delete_file"}
+_PERSISTENT_CLIENT = None
 
 
 class QuotaException(Exception):
-    """Raised when Gemini returns a 429 quota exhaustion or rate limit."""
     pass
+
+
+def get_client() -> genai.Client:
+    """Maintains a persistent genai.Client instance so the HTTP transport is never prematurely closed."""
+    global _PERSISTENT_CLIENT
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if _PERSISTENT_CLIENT is None:
+        _PERSISTENT_CLIENT = genai.Client(api_key=api_key)
+    return _PERSISTENT_CLIENT
+
+
+def reset_client():
+    """Resets the client when API key or workspace environment changes."""
+    global _PERSISTENT_CLIENT
+    _PERSISTENT_CLIENT = None
 
 
 def _load_ground_rules() -> str:
@@ -90,7 +105,8 @@ def _compile_tool_definitions():
 
 
 def new_chat():
-    client = genai.Client()
+    """Initializes chat session using the persistent client connection."""
+    client = get_client()
     return client.chats.create(
         model=STATE.model,
         config=types.GenerateContentConfig(
