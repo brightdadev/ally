@@ -1,0 +1,29 @@
+{
+  "default_model": "gemini-3.7-flash",
+  "models": [
+    {
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "description": "Next-gen flagship model for heavy reasoning and architecture",
+      "tier": "flagship"
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "description": "High-throughput coding model optimized for tool calling",
+      "tier": "performance"
+    },
+    {
+      "id": "gemini-3.7-flash",
+      "name": "Gemini 3.7 Flash",
+      "description": "Balanced daily-driver coding assistant",
+      "tier": "standard"
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "name": "Gemini 3.1 Pro Preview",
+      "description": "Preview model for deep context analysis and planning",
+      "tier": "preview"
+    }
+  ]
+}

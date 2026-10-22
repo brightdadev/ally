@@ -1,16 +1,12 @@
-﻿"""
+"""
 Filesystem tools for Ally with directory sandbox enforcement.
 Author: Bright da dev
 """
 from pathlib import Path
-from state import STATE
+from app.state import STATE
 
 
 def _resolve(path: str) -> Path:
-    """
-    Resolve a given path relative to STATE.root and ensure it does not
-    escape the project root boundary (Path Traversal Defense).
-    """
     root = STATE.root.resolve()
     p = Path(path)
     target = (root / p).resolve() if not p.is_absolute() else p.resolve()
@@ -24,7 +20,6 @@ def _resolve(path: str) -> Path:
 
 
 def read_file(path: str) -> str:
-    """Read a file's full contents safely."""
     try:
         return _resolve(path).read_text(encoding="utf-8")
     except Exception as e:
@@ -32,7 +27,6 @@ def read_file(path: str) -> str:
 
 
 def write_file(path: str, content: str) -> str:
-    """Create or overwrite a file safely within project boundaries."""
     try:
         p = _resolve(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -43,7 +37,6 @@ def write_file(path: str, content: str) -> str:
 
 
 def patch_file(path: str, old: str, new: str) -> str:
-    """Safely replace a string block within a file."""
     try:
         p = _resolve(path)
         if not p.is_file():
@@ -58,7 +51,6 @@ def patch_file(path: str, old: str, new: str) -> str:
 
 
 def delete_file(path: str) -> str:
-    """Safely delete a file within project boundaries."""
     try:
         p = _resolve(path)
         if not p.is_file():
@@ -70,7 +62,6 @@ def delete_file(path: str) -> str:
 
 
 def list_dir(path: str = ".") -> str:
-    """List directory contents within project boundaries."""
     try:
         p = _resolve(path)
         if not p.is_dir():
