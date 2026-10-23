@@ -31,7 +31,7 @@ class TokenTracker:
 class AllyState:
     root: Path = field(default_factory=Path.cwd)
     project_brief: str = ""
-    mode: str = "accept"        # plan | accept | auto
+    mode: str = "accept"
     model: str = field(default_factory=ROUTER.get_default_model)
     username: str = "developer"
     active_key_index: int = 1

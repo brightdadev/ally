@@ -74,7 +74,6 @@ class ApiKeyModal(ModalScreen[bool]):
             profile.api_key_2 = k2
             save_profile(profile)
 
-            # Update active runtime env
             if k1:
                 os.environ["GEMINI_API_KEY"] = k1
                 STATE.active_key_index = 1
@@ -82,7 +81,6 @@ class ApiKeyModal(ModalScreen[bool]):
                 os.environ["GEMINI_API_KEY"] = k2
                 STATE.active_key_index = 2
 
-            # Write to local .env
             env_file = STATE.root / ".env"
             env_lines = []
             if k1:

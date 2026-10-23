@@ -33,7 +33,6 @@ def load_profile() -> UserProfile:
         return UserProfile()
     try:
         data = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
-        # Backwards compatibility check
         k1 = data.get("api_key_1") or data.get("global_api_key", "")
         k2 = data.get("api_key_2", "")
         return UserProfile(

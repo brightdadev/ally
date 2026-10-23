@@ -1,5 +1,5 @@
 """
-Terminal-Native IDE for Ally v1.0.3-nightly.
+Terminal-Native IDE for Ally v1.0.4.
 Author: Bright da dev
 """
 import asyncio
@@ -28,15 +28,19 @@ from app import agent
 from app.state import STATE
 from app.model.router import ROUTER
 from user.onboarding import profile_exists, load_profile
-from tui.screens import OnboardingModal, ProjectPrepModal, ModelSelectModal, ApiKeyModal, TokenUsageModal
+from tui.screens import (
+    OnboardingModal,
+    ProjectPrepModal,
+    ModelSelectModal,
+    ApiKeyModal,
+    TokenUsageModal,
+)
 
 
 def format_clean_error(err: Exception, current_model: str) -> Panel:
-    """Parses raw Google API errors into clean, compact, actionable TUI cards."""
     err_str = str(err)
     err_lower = err_str.lower()
 
-    # 1. Quota / Rate-limit (429)
     if "429" in err_str or "resource_exhausted" in err_lower:
         limit_note = ""
         if "limit: 20" in err_str:
@@ -50,11 +54,10 @@ def format_clean_error(err: Exception, current_model: str) -> Panel:
 
         body = (
             f"[bold red]Quota Limit Reached for {current_model}[/]{limit_note}\n\n"
-            f"[dim yellow]Action:[/] Press [bold cyan]F2[/] to switch to [bold green]gemini-3.7-flash[/] or another model."
+            f"[dim yellow]Action:[/] Press [bold cyan]F2[/] to switch model, or [bold cyan]Ctrl+K[/] to add a Backup API Key (Key 2)."
         )
         return Panel(body, title="[bold red]API Quota (429)[/]", border_style="red", padding=(1, 2))
 
-    # 2. Server Overloaded (503)
     if "503" in err_str or "unavailable" in err_lower:
         body = (
             f"[bold red]Google Servers Overloaded (503)[/]\n\n"
@@ -63,7 +66,6 @@ def format_clean_error(err: Exception, current_model: str) -> Panel:
         )
         return Panel(body, title="[bold red]Service Unavailable (503)[/]", border_style="red", padding=(1, 2))
 
-    # 3. Connection drop (10053)
     if "10053" in err_str:
         body = (
             "[bold yellow]Connection Reset by Host[/]\n\n"
@@ -71,7 +73,6 @@ def format_clean_error(err: Exception, current_model: str) -> Panel:
         )
         return Panel(body, title="[bold yellow]Network Reset[/]", border_style="yellow", padding=(1, 2))
 
-    # 4. Clean summary for any other API error
     clean_msg = err_str
     if "'message':" in err_str:
         try:
@@ -93,7 +94,7 @@ class WorkspaceTree(DirectoryTree):
 
 class AllyApp(App):
     TITLE = "Ally"
-    SUB_TITLE = "Terminal IDE v1.0.3-nightly"
+    SUB_TITLE = "Terminal IDE v1.0.4"
 
     CSS = """
     Screen {
@@ -182,7 +183,7 @@ class AllyApp(App):
         Binding("f4", "open_usage", "Token Usage", priority=True),
         Binding("ctrl+b", "toggle_sidebar", "Explorer", priority=True),
         Binding("ctrl+p", "toggle_process", "Process Box", priority=True),
-        Binding("ctrl+k", "open_api_key", "API Key"),
+        Binding("ctrl+k", "open_api_key", "API Keys"),
         Binding("ctrl+o", "open_onboarding", "Profile"),
         Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
@@ -203,16 +204,17 @@ class AllyApp(App):
             ),
             Vertical(
                 Horizontal(
-                    Static("[bold green]â— READY[/]", id="badge-status", classes="badge"),
+                    Static("[bold green]● READY[/]", id="badge-status", classes="badge"),
                     Static(f"[cyan]User:[/] {STATE.username}", id="badge-user", classes="badge"),
                     Static(f"[green]Model (F2):[/] {STATE.model}", id="badge-model", classes="badge"),
                     Static(f"[yellow]Mode:[/] {STATE.mode.upper()}", id="badge-mode", classes="badge"),
+                    Static(f"[magenta]Key:[/] #{STATE.active_key_index}", id="badge-key", classes="badge"),
                     Static(f"[dim]Root:[/] {STATE.root.name}", id="badge-root", classes="badge"),
                     id="top-breadcrumbs",
                 ),
                 RichLog(id="log", wrap=True, markup=True),
                 Vertical(
-                    Input(placeholder="Type prompt or command (/help, /prep, /key)... [F2: Model, Ctrl+B: Explorer, Ctrl+P: Process]", id="prompt"),
+                    Input(placeholder="Type prompt or command (/help, /prep, /usage, /key)... [F4: Usage, F2: Model, Ctrl+B: Explorer]", id="prompt"),
                     id="prompt-container",
                 ),
                 id="main-panel",
@@ -235,51 +237,52 @@ class AllyApp(App):
             if prof.default_model in ROUTER.list_models():
                 STATE.model = prof.default_model
             else:
-                STATE.model = "gemini-3.7-flash"
+                STATE.model = ROUTER.get_default_model()
             STATE.mode = prof.default_mode
-            if prof.global_api_key and not os.environ.get("GEMINI_API_KEY"):
-                os.environ["GEMINI_API_KEY"] = prof.global_api_key
+            if prof.api_key_1 and not os.environ.get("GEMINI_API_KEY"):
+                os.environ["GEMINI_API_KEY"] = prof.api_key_1
             self._refresh_status()
 
         self._log_process("System booted. Ready.")
 
-        if not os.environ.get("GEMINI_API_KEY"):
+        if not os.environ.get("GEMINI_API_KEY") and not agent.get_active_key():
             self.action_open_api_key()
         else:
             self._boot()
 
     def _boot(self):
         log = self.query_one("#log", RichLog)
-        if not os.environ.get("GEMINI_API_KEY"):
+        if not os.environ.get("GEMINI_API_KEY") and not agent.get_active_key():
             return
 
         try:
             agent.reset_client()
             self.chat = agent.new_chat()
-            log.write(f"[bold green]Ally Terminal IDE v1.0.3-nightly Online.[/] [dim]Engine by Bright da dev[/dim]")
-            log.write(f"[cyan]Model:[/] [bold]{STATE.model}[/] | [yellow]Mode:[/] [bold]{STATE.mode}[/] | [bold]Root:[/] {STATE.root.name}")
-            log.write("[dim]Shortcuts: [bold]F2[/]: Model Select | [bold]F3[/]: Project Prep | [bold]Ctrl+P[/]: Process Box | [bold]Ctrl+B[/]: Explorer[/dim]\n")
-            self._log_process(f"Session active: {STATE.model}")
+            log.write(f"[bold green]Ally Terminal IDE v1.0.4 Online.[/] [dim]Engine by Bright da dev[/dim]")
+            log.write(f"[cyan]Model:[/] [bold]{STATE.model}[/] | [yellow]Mode:[/] [bold]{STATE.mode}[/] | [magenta]Active Key:[/] #{STATE.active_key_index}")
+            log.write("[dim]Shortcuts: [bold]F2[/]: Model Select | [bold]F3[/]: Project Prep | [bold]F4[/]: Token Usage | [bold]Ctrl+K[/]: Set 2 Keys[/dim]\n")
+            self._log_process(f"Session active: {STATE.model} (Key #{STATE.active_key_index})")
         except Exception as e:
             log.write(format_clean_error(e, STATE.model))
-            self._log_process(f"[red]Boot error[/]")
+            self._log_process("[red]Boot error[/]")
 
     def _refresh_status(self):
         self.query_one("#badge-user", Static).update(f"[cyan]User:[/] {STATE.username}")
         self.query_one("#badge-model", Static).update(f"[green]Model (F2):[/] {STATE.model}")
         self.query_one("#badge-mode", Static).update(f"[yellow]Mode:[/] {STATE.mode.upper()}")
+        self.query_one("#badge-key", Static).update(f"[magenta]Key:[/] #{STATE.active_key_index}")
         self.query_one("#badge-root", Static).update(f"[dim]Root:[/] {STATE.root.name}")
 
     def _set_activity(self, state: str):
         badge = self.query_one("#badge-status", Static)
         if state == "thinking":
-            badge.update("[bold magenta]â ‹ THINKING...[/]")
+            badge.update("[bold magenta]⠋ THINKING...[/]")
         elif state == "streaming":
-            badge.update("[bold cyan]â— STREAMING...[/]")
+            badge.update("[bold cyan]● STREAMING...[/]")
         elif state == "executing":
-            badge.update("[bold yellow]âš™ EXECUTING...[/]")
+            badge.update("[bold yellow]⚙ EXECUTING...[/]")
         else:
-            badge.update("[bold green]â— READY[/]")
+            badge.update("[bold green]● READY[/]")
 
     def _log_process(self, message: str):
         plog = self.query_one("#process-log", RichLog)
@@ -297,10 +300,13 @@ class AllyApp(App):
         def _on_key_set(saved: bool):
             if saved:
                 log = self.query_one("#log", RichLog)
-                log.write("[bold green]GEMINI_API_KEY saved successfully.[/]")
-                self._log_process("API Key updated.")
+                log.write("[bold green]Dual API Keys updated successfully.[/]")
+                self._log_process("API Keys updated.")
                 self._boot()
         self.push_screen(ApiKeyModal(), _on_key_set)
+
+    def action_open_usage(self):
+        self.push_screen(TokenUsageModal())
 
     def action_switch_model(self):
         def _on_switched(new_model: str):
@@ -311,8 +317,6 @@ class AllyApp(App):
                 self._log_process(f"Switched to {new_model}")
         self.push_screen(ModelSelectModal(STATE.model, is_quota_alert=False), _on_switched)
 
-        def action_open_usage(self):
-        self.push_screen(TokenUsageModal())
     def action_open_prep(self):
         def _on_closed(prepped: bool):
             if prepped:
@@ -338,12 +342,14 @@ class AllyApp(App):
             "  [bold]F1[/]              Display command guide\n"
             "  [bold]F2[/]              Open Model Selection\n"
             "  [bold]F3[/]              Open Project Prep Wizard\n"
+            "  [bold]F4[/]              Open Token Analytics & Key Usage\n"
             "  [bold]Ctrl+B[/]          Toggle Project Explorer Sidebar\n"
             "  [bold]Ctrl+P[/]          Toggle Process & Trace Box\n"
-            "  [bold]Ctrl+K[/]          Configure GEMINI_API_KEY\n"
+            "  [bold]Ctrl+K[/]          Configure Dual GEMINI_API_KEYs (Key 1 & Key 2)\n"
             "  [bold]Ctrl+O[/]          Edit Developer Profile\n"
             "  [bold]Ctrl+Q[/]          Quit Ally\n"
-            "  /key              Set Gemini API key\n"
+            "  /usage            View Token Analytics\n"
+            "  /key              Set Gemini API keys\n"
             "  /model <name>     Switch active model\n"
             "  /models           List available catalog models\n"
             "  /plan             Set mode to read-only planning\n"
@@ -406,7 +412,7 @@ class AllyApp(App):
             return
 
         if self.chat is None:
-            self.query_one("#log", RichLog).write("[red]Ally not initialized. Press Ctrl+K to enter GEMINI_API_KEY.[/]")
+            self.query_one("#log", RichLog).write("[red]Ally not initialized. Press Ctrl+K to enter your API Keys.[/]")
             return
 
         if self._busy:
@@ -452,13 +458,12 @@ class AllyApp(App):
                 log.write(panel)
             tree = self.query_one("#file-tree", WorkspaceTree)
             tree.reload()
+            self._refresh_status()
         except Exception as e:
-            # CLEAN, HUMAN-READABLE ERROR CARD (Zero raw JSON RPC dumps)
             error_card = format_clean_error(e, STATE.model)
             log.write(error_card)
             self._log_process("[red]Execution notice[/]")
 
-            # Auto-heal session to prevent consecutive user turn desync
             try:
                 agent.reset_client()
                 self.chat = agent.new_chat()
@@ -475,6 +480,8 @@ class AllyApp(App):
 
         if cmd == "/help":
             self.action_show_help()
+        elif cmd == "/usage":
+            self.action_open_usage()
         elif cmd == "/key":
             self.action_open_api_key()
         elif cmd == "/prep":
@@ -496,7 +503,7 @@ class AllyApp(App):
             self._refresh_status()
             log.write(f"[green]Mode updated to {STATE.mode.upper()}[/]")
         elif cmd == "/status":
-            log.write(f"User: {STATE.username} | Mode: {STATE.mode} | Model: {STATE.model} | Root: {STATE.root}")
+            log.write(f"User: {STATE.username} | Mode: {STATE.mode} | Model: {STATE.model} | Active Key: #{STATE.active_key_index} | Root: {STATE.root}")
         elif cmd == "/reset":
             self._reset_chat("Session context reset.")
         elif cmd == "/quit":

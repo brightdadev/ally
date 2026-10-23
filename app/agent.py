@@ -12,7 +12,7 @@ from app.state import STATE
 from app import tools
 from context.skills import SKILLS
 from context.memory import read_memory
-from user.onboarding import load_profile, save_profile
+from user.onboarding import load_profile
 
 
 WRITE_TOOLS = {"write_file", "patch_file", "delete_file"}
@@ -37,7 +37,6 @@ def get_active_key() -> str:
 
 
 def rotate_to_backup_key() -> bool:
-    """Rotates to secondary key if primary hits quota."""
     prof = load_profile()
     if STATE.active_key_index == 1 and prof.api_key_2:
         STATE.active_key_index = 2
@@ -190,11 +189,9 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
 
             if msg_type == "error":
                 err = str(payload).lower()
-                # Check for quota error and attempt failover to Key 2
                 if ("429" in err or "quota" in err or "resource_exhausted" in err) and rotate_to_backup_key():
                     if on_step:
                         on_step(f"Quota hit. Auto-rotated to Key #{STATE.active_key_index}!")
-                    # Retry stream with backup key
                     chat = new_chat()
                     return await run_turn(chat, user_text_or_parts, on_token, request_approval, on_step)
 
@@ -221,7 +218,6 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
                 if chunk.function_calls:
                     accumulated_calls.extend(chunk.function_calls)
 
-                # Collect usage metadata if reported by Gemini
                 if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
                     u = chunk.usage_metadata
                     p = getattr(u, "prompt_token_count", 0) or 0
