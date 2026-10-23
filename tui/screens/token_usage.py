@@ -1,5 +1,5 @@
 """
-Token Usage Analytics Modal for Ally.
+Token Usage Analytics Modal for Ally (Pure Black Edition).
 Author: Bright da dev
 """
 from textual.app import ComposeResult
@@ -13,18 +13,18 @@ class TokenUsageModal(ModalScreen[bool]):
     CSS = """
     TokenUsageModal {
         align: center middle;
-        background: rgba(0, 0, 0, 0.7);
+        background: rgba(0, 0, 0, 0.85);
     }
     #usage-dialog {
         width: 65;
         height: auto;
-        border: thick #00d2ff;
-        background: #141b24;
+        border: solid #222222;
+        background: #000000;
         padding: 1 2;
     }
     .title {
         text-style: bold;
-        color: #00d2ff;
+        color: #ffffff;
         text-align: center;
         margin-bottom: 1;
     }
@@ -34,11 +34,16 @@ class TokenUsageModal(ModalScreen[bool]):
     }
     .metric-label {
         width: 32;
-        color: #8b9bb4;
+        color: #666666;
     }
     .metric-val {
-        color: #00ff88;
+        color: #00ff66;
         text-style: bold;
+    }
+    .section-header {
+        color: #888888;
+        margin-top: 1;
+        margin-bottom: 1;
     }
     #usage-buttons {
         margin-top: 1;
@@ -49,17 +54,17 @@ class TokenUsageModal(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         t = STATE.tokens
         yield Vertical(
-            Label("Ally Token Analytics & Key Usage", classes="title"),
-            Horizontal(Label("Total Requests Completed:", classes="metric-label"), Static(str(t.total_requests), classes="metric-val"), classes="metric-row"),
-            Horizontal(Label("Prompt Tokens Ingested:", classes="metric-label"), Static(f"{t.prompt_tokens:,}", classes="metric-val"), classes="metric-row"),
-            Horizontal(Label("Completion Tokens Generated:", classes="metric-label"), Static(f"{t.candidate_tokens:,}", classes="metric-val"), classes="metric-row"),
-            Horizontal(Label("Total Token Consumption:", classes="metric-label"), Static(f"[bold cyan]{t.total_tokens:,}[/]", classes="metric-val"), classes="metric-row"),
-            Label("--- Dual API Key Distribution ---", classes="metric-label"),
-            Horizontal(Label("Requests on Primary Key (1):", classes="metric-label"), Static(str(t.key1_requests), classes="metric-val"), classes="metric-row"),
-            Horizontal(Label("Requests on Backup Key (2):", classes="metric-label"), Static(str(t.key2_requests), classes="metric-val"), classes="metric-row"),
-            Horizontal(Label("Currently Active Key:", classes="metric-label"), Static(f"Key #{STATE.active_key_index}", classes="metric-val"), classes="metric-row"),
+            Label("Token Consumption & API Key Metrics", classes="title"),
+            Horizontal(Label("Requests Completed:", classes="metric-label"), Static(str(t.total_requests), classes="metric-val"), classes="metric-row"),
+            Horizontal(Label("Prompt Tokens:", classes="metric-label"), Static(f"{t.prompt_tokens:,}", classes="metric-val"), classes="metric-row"),
+            Horizontal(Label("Completion Tokens:", classes="metric-label"), Static(f"{t.candidate_tokens:,}", classes="metric-val"), classes="metric-row"),
+            Horizontal(Label("Total Token Volume:", classes="metric-label"), Static(f"{t.total_tokens:,}", classes="metric-val"), classes="metric-row"),
+            Label("--- Dual Key Distribution ---", classes="section-header"),
+            Horizontal(Label("Primary Key (1) Requests:", classes="metric-label"), Static(str(t.key1_requests), classes="metric-val"), classes="metric-row"),
+            Horizontal(Label("Backup Key (2) Requests:", classes="metric-label"), Static(str(t.key2_requests), classes="metric-val"), classes="metric-row"),
+            Horizontal(Label("Active Key Index:", classes="metric-label"), Static(f"Key #{STATE.active_key_index}", classes="metric-val"), classes="metric-row"),
             Horizontal(
-                Button("Close", variant="primary", id="btn-close"),
+                Button("Close", variant="default", id="btn-close"),
                 id="usage-buttons",
             ),
             id="usage-dialog",

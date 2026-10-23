@@ -1,5 +1,5 @@
 """
-Dual API Key Configuration Modal for Ally.
+Dual API Key Configuration Modal for Ally (Pure Black Edition).
 Author: Bright da dev
 """
 import os
@@ -16,27 +16,27 @@ class ApiKeyModal(ModalScreen[bool]):
     CSS = """
     ApiKeyModal {
         align: center middle;
-        background: rgba(0, 0, 0, 0.7);
+        background: rgba(0, 0, 0, 0.85);
     }
     #api-dialog {
         width: 70;
         height: auto;
-        border: thick #00d2ff;
-        background: #141b24;
+        border: solid #222222;
+        background: #000000;
         padding: 1 2;
     }
     .title {
         text-style: bold;
-        color: #00d2ff;
+        color: #ffffff;
         text-align: center;
         margin-bottom: 1;
     }
     .hint {
-        color: #8b9bb4;
+        color: #666666;
         margin-bottom: 1;
     }
     .field-label {
-        color: #e6edf3;
+        color: #aaaaaa;
         margin-top: 1;
     }
     #api-buttons {
@@ -48,14 +48,14 @@ class ApiKeyModal(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         prof = load_profile()
         yield Vertical(
-            Label("Dual Gemini API Key Management", classes="title"),
+            Label("API Key Management", classes="title"),
             Label("Configure up to 2 keys. Key 2 acts as automatic quota failover.", classes="hint"),
-            Label("Primary API Key (Key 1 - Required):", classes="field-label"),
+            Label("Primary API Key (Key 1):", classes="field-label"),
             Input(value=prof.api_key_1, placeholder="AIzaSy... (Key 1)", password=True, id="input-key-1"),
-            Label("Backup API Key (Key 2 - Optional Quota Failover):", classes="field-label"),
+            Label("Backup API Key (Key 2):", classes="field-label"),
             Input(value=prof.api_key_2, placeholder="AIzaSy... (Key 2)", password=True, id="input-key-2"),
             Horizontal(
-                Button("Save Keys & Continue", variant="primary", id="btn-save-keys"),
+                Button("Save Keys", variant="default", id="btn-save-keys"),
                 id="api-buttons",
             ),
             id="api-dialog",
