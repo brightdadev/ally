@@ -1,5 +1,5 @@
 """
-Project Preparation Wizard Modal for Ally.
+Compact Pure-Black Project Prep Wizard Modal.
 Author: Bright da dev
 """
 from textual.app import ComposeResult
@@ -14,23 +14,24 @@ class ProjectPrepModal(ModalScreen[bool]):
     CSS = """
     ProjectPrepModal {
         align: center middle;
+        background: rgba(0, 0, 0, 0.85);
     }
     #prep-dialog {
-        width: 70;
+        width: 65;
         height: auto;
-        border: thick $success;
-        background: $surface;
+        border: solid #1f1f1f;
+        background: #000000;
         padding: 1 2;
     }
     .title {
         text-style: bold;
-        color: $success;
-        margin-bottom: 1;
+        color: #ffffff;
         text-align: center;
+        margin-bottom: 1;
     }
     .field-label {
+        color: #777777;
         margin-top: 1;
-        color: $text;
     }
     #prep-buttons {
         margin-top: 1;
@@ -40,18 +41,18 @@ class ProjectPrepModal(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Label("Ally Project Preparation Wizard", classes="title"),
+            Label("Project Preparation Wizard", classes="title"),
             Label("Project Name:", classes="field-label"),
             Input(value=STATE.root.name, id="prep-name"),
-            Label("Primary Objective / Brief:", classes="field-label"),
-            Input(placeholder="What is this system building?", id="prep-objective"),
-            Label("Tech Stack & Dependencies:", classes="field-label"),
-            Input(placeholder="e.g., Python 3.14, Textual, Google GenAI", id="prep-stack"),
+            Label("Objective / Brief:", classes="field-label"),
+            Input(placeholder="What is this project building?", id="prep-objective"),
+            Label("Tech Stack:", classes="field-label"),
+            Input(placeholder="e.g. Python, Textual", id="prep-stack"),
             Label("Engineering Constraints:", classes="field-label"),
-            Input(placeholder="e.g., Sandboxed, no external databases", id="prep-conventions"),
+            Input(placeholder="e.g. Sandboxed, no external DB", id="prep-conventions"),
             Horizontal(
                 Button("Cancel", variant="default", id="btn-cancel"),
-                Button("Initialize Project", variant="success", id="btn-init"),
+                Button("Initialize Project", variant="primary", id="btn-init"),
                 id="prep-buttons",
             ),
             id="prep-dialog",

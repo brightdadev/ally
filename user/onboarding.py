@@ -1,5 +1,5 @@
 """
-Global user onboarding and dual API key management for Ally.
+Global user onboarding, dual API keys, and theme settings.
 Author: Bright da dev
 """
 import json
@@ -18,6 +18,7 @@ class UserProfile:
     api_key_1: str = ""
     api_key_2: str = ""
     active_key_index: int = 1
+    accent_theme: str = "cobalt"
 
 
 def get_profile_path() -> Path:
@@ -42,6 +43,7 @@ def load_profile() -> UserProfile:
             api_key_1=k1,
             api_key_2=k2,
             active_key_index=data.get("active_key_index", 1),
+            accent_theme=data.get("accent_theme", "cobalt"),
         )
     except Exception:
         return UserProfile()

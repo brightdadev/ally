@@ -3,5 +3,13 @@ from tui.screens.project_prep import ProjectPrepModal
 from tui.screens.model_select import ModelSelectModal
 from tui.screens.api_key import ApiKeyModal
 from tui.screens.token_usage import TokenUsageModal
+from tui.screens.palette import ThemePaletteModal
 
-__all__ = ["OnboardingModal", "ProjectPrepModal", "ModelSelectModal", "ApiKeyModal", "TokenUsageModal"]
+__all__ = [
+    "OnboardingModal",
+    "ProjectPrepModal",
+    "ModelSelectModal",
+    "ApiKeyModal",
+    "TokenUsageModal",
+    "ThemePaletteModal",
+]

@@ -8,6 +8,12 @@
       "tier": "standard"
     },
     {
+      "id": "gemini-3.5-flash-lite",
+      "name": "Gemini 3.5 Flash Lite",
+      "description": "Cost-effective, lightweight model for fast queries and light tasks",
+      "tier": "lite"
+    },
+    {
       "id": "gemini-3.8-flash",
       "name": "Gemini 3.8 Flash",
       "description": "High-throughput, ultra-responsive next-gen coding model",

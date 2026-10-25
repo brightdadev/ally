@@ -1,5 +1,5 @@
 """
-Cleaned-Up Pitch-Black Terminal IDE for Ally.
+Pitch-Black Terminal IDE with Textual Native Theme Engine.
 Author: Bright da dev
 """
 import asyncio
@@ -17,8 +17,9 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 from textual.app import App, ComposeResult
+from textual.theme import Theme
 from textual.widgets import (
-    Input, RichLog, Static, Header, Footer, DirectoryTree, Label
+    Input, RichLog, Static, Header, Footer, DirectoryTree, Label, Select
 )
 from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
@@ -27,14 +28,75 @@ from textual import work
 from app import agent
 from app.state import STATE
 from app.model.router import ROUTER
-from user.onboarding import profile_exists, load_profile
+from user.onboarding import profile_exists, load_profile, save_profile
 from tui.screens import (
     OnboardingModal,
     ProjectPrepModal,
     ModelSelectModal,
     ApiKeyModal,
     TokenUsageModal,
+    ThemePaletteModal,
 )
+
+# =============================================================================
+# TEXTUAL NATIVE FRAMEWORK THEMES (Zero Blue Leaks Framework-Wide)
+# =============================================================================
+NATIVE_THEMES = {
+    "purple": Theme(
+        name="ally-purple",
+        primary="#6d3bcc",
+        accent="#a78bfa",
+        background="#000000",
+        surface="#000000",
+        panel="#000000",
+        foreground="#ffffff",
+    ),
+    "amber": Theme(
+        name="ally-amber",
+        primary="#b87004",
+        accent="#f59e0b",
+        background="#000000",
+        surface="#000000",
+        panel="#000000",
+        foreground="#ffffff",
+    ),
+    "monochrome": Theme(
+        name="ally-monochrome",
+        primary="#444444",
+        accent="#888888",
+        background="#000000",
+        surface="#000000",
+        panel="#000000",
+        foreground="#ffffff",
+    ),
+    "cobalt": Theme(
+        name="ally-cobalt",
+        primary="#005a9e",
+        accent="#007acc",
+        background="#000000",
+        surface="#000000",
+        panel="#000000",
+        foreground="#ffffff",
+    ),
+    "emerald": Theme(
+        name="ally-emerald",
+        primary="#0e7a53",
+        accent="#10b981",
+        background="#000000",
+        surface="#000000",
+        panel="#000000",
+        foreground="#ffffff",
+    ),
+    "cyan": Theme(
+        name="ally-cyan",
+        primary="#0088a8",
+        accent="#00e5ff",
+        background="#000000",
+        surface="#000000",
+        panel="#000000",
+        foreground="#ffffff",
+    ),
+}
 
 
 def format_clean_error(err: Exception, current_model: str) -> Panel:
@@ -99,81 +161,140 @@ class AllyApp(App):
     CSS = """
     Screen {
         layout: vertical;
-        background: #000000;
+        background: $background;
+    }
+    ModalScreen {
+        background: rgba(0, 0, 0, 0.9);
     }
     Header {
-        background: #000000;
-        color: #555555;
+        background: $background;
+        color: #444444;
         dock: top;
         height: 1;
-        border-bottom: solid #1a1a1a;
+        border-bottom: solid #141414;
     }
     Footer {
-        background: #000000;
-        color: #555555;
+        background: $background;
+        color: #444444;
         dock: bottom;
         height: 1;
-        border-top: solid #1a1a1a;
+        border-top: solid #141414;
     }
     .footer--key {
-        background: #111111;
-        color: #888888;
+        background: #0d0d0d;
+        color: #777777;
     }
     .footer--description {
-        color: #555555;
+        color: #444444;
     }
+
+    /* BUTTONS: NATIVELY BOUND TO $primary AND $accent */
+    Button.-primary {
+        background: $primary;
+        color: #ffffff;
+        border: solid $accent;
+    }
+    Button.-primary:hover {
+        background: $accent;
+    }
+    Button.-default {
+        background: #141414;
+        color: #777777;
+        border: solid #222222;
+    }
+    Button.-default:hover {
+        background: #222222;
+        color: #cccccc;
+    }
+
+    /* DROPDOWNS: NATIVELY BOUND TO $primary AND $accent */
+    Select {
+        background: $background;
+        border: none;
+        padding: 0;
+    }
+    SelectCurrent {
+        background: $background;
+        border: solid $primary;
+        color: #ffffff;
+    }
+    Select:focus > SelectCurrent {
+        border: solid $accent;
+    }
+    SelectOverlay {
+        background: $background;
+        border: solid $primary;
+    }
+    OptionList {
+        background: $background;
+    }
+    OptionList > .option-list--option-highlighted {
+        background: $primary;
+        color: #ffffff;
+        text-style: bold;
+    }
+
+    /* WORKSPACE LAYOUT */
     #ide-layout {
         height: 1fr;
         layout: horizontal;
-        background: #000000;
+        background: $background;
+        overflow-x: hidden;
     }
     #sidebar {
         width: 26;
-        background: #000000;
-        border-right: solid #1a1a1a;
+        background: $background;
+        border-right: solid #141414;
+        overflow-x: hidden;
     }
     #sidebar.hidden {
         display: none;
     }
     #process-panel {
         width: 36;
-        background: #000000;
-        border-left: solid #1a1a1a;
+        background: $background;
+        border-left: solid #141414;
+        overflow-x: hidden;
     }
     #process-panel.hidden {
         display: none;
     }
     .panel-header {
         height: 1;
-        background: #000000;
-        color: #555555;
+        background: $background;
+        color: #444444;
         text-style: bold;
         padding: 0 1;
-        border-bottom: solid #1a1a1a;
+        border-bottom: solid #141414;
     }
     #file-tree {
         height: 1fr;
-        background: #000000;
+        background: $background;
+        border: none;
         padding: 0 1;
-        color: #777777;
+        color: #666666;
+        overflow-x: hidden;
     }
     #process-log {
         height: 1fr;
-        background: #000000;
+        background: $background;
+        border: none;
         padding: 0 1;
         color: #555555;
+        overflow-x: hidden;
     }
     #main-panel {
         width: 1fr;
         height: 1fr;
         layout: vertical;
-        background: #000000;
+        background: $background;
+        overflow-x: hidden;
     }
     #top-breadcrumbs {
         height: 1;
-        background: #000000;
+        background: $background;
         padding: 0 1;
-        border-bottom: solid #1a1a1a;
+        border-bottom: solid #141414;
     }
     .badge-pill {
         margin-right: 2;
@@ -181,20 +302,28 @@ class AllyApp(App):
     }
     #log {
         height: 1fr;
-        background: #000000;
+        background: $background;
         border: none;
         padding: 1 2;
+        overflow-x: hidden;
     }
     #composer-container {
         height: 3;
-        background: #000000;
-        border-top: solid #1a1a1a;
+        background: $background;
+        border-top: solid $primary;
         padding: 0 1;
     }
     #prompt {
-        background: #000000;
+        background: $background;
         border: none;
         color: #ffffff;
+    }
+    Input {
+        background: $background;
+        border: solid #1a1a1a;
+    }
+    Input:focus {
+        border: solid $accent;
     }
     """
 
@@ -205,6 +334,7 @@ class AllyApp(App):
         Binding("f4", "open_usage", "Usage", priority=True),
         Binding("ctrl+b", "toggle_sidebar", "Explorer", priority=True),
         Binding("ctrl+p", "toggle_process", "Process", priority=True),
+        Binding("ctrl+t", "open_palette", "Palette", priority=True),
         Binding("ctrl+k", "open_api_key", "Keys"),
         Binding("ctrl+o", "open_onboarding", "Profile"),
         Binding("ctrl+q", "quit", "Quit", priority=True),
@@ -215,34 +345,33 @@ class AllyApp(App):
         self.chat = None
         self._approval_future = None
         self._busy = False
+        self.accent_theme = "purple"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Horizontal(
-            # Left: Explorer
             Vertical(
                 Label("EXPLORER", classes="panel-header"),
                 WorkspaceTree(str(STATE.root), id="file-tree"),
                 id="sidebar",
             ),
-            # Center: Main Workspace
             Vertical(
                 Horizontal(
                     Static("[bold #00ff66][ready][/]", id="badge-status", classes="badge-pill"),
                     Static(f"model: [bold #ffffff]{STATE.model}[/]", id="badge-model", classes="badge-pill"),
                     Static(f"mode: [bold #cccccc]{STATE.mode}[/]", id="badge-mode", classes="badge-pill"),
                     Static(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]", id="badge-key", classes="badge-pill"),
+                    Static(f"theme: [bold]{self.accent_theme}[/]", id="badge-theme", classes="badge-pill"),
                     Static(f"root: [dim #555555]{STATE.root.name}[/]", id="badge-root", classes="badge-pill"),
                     id="top-breadcrumbs",
                 ),
                 RichLog(id="log", wrap=True, markup=True),
                 Vertical(
-                    Input(placeholder="Ask Ally... (/help, F2 model, F4 stats, ^B explorer, ^P process)", id="prompt"),
+                    Input(placeholder="Ask Ally... (/help, F2 model, F4 stats, ^T palette, ^B explorer)", id="prompt"),
                     id="composer-container",
                 ),
                 id="main-panel",
             ),
-            # Right: Process Log
             Vertical(
                 Label("PROCESS", classes="panel-header"),
                 RichLog(id="process-log", wrap=True, markup=True),
@@ -255,17 +384,24 @@ class AllyApp(App):
     def on_mount(self):
         self.query_one("#prompt").focus()
 
-        if profile_exists():
-            prof = load_profile()
-            STATE.username = prof.username
-            if prof.default_model in ROUTER.list_models():
-                STATE.model = prof.default_model
-            else:
-                STATE.model = ROUTER.get_default_model()
-            STATE.mode = prof.default_mode
-            if prof.api_key_1 and not os.environ.get("GEMINI_API_KEY"):
-                os.environ["GEMINI_API_KEY"] = prof.api_key_1
-            self._refresh_status()
+        # 1. Register all native framework themes
+        for t_obj in NATIVE_THEMES.values():
+            self.register_theme(t_obj)
+
+        prof = load_profile()
+        STATE.username = prof.username
+        if prof.default_model in ROUTER.list_models():
+            STATE.model = prof.default_model
+        else:
+            STATE.model = ROUTER.get_default_model()
+        STATE.mode = prof.default_mode
+        self.accent_theme = prof.accent_theme or "purple"
+        if prof.api_key_1 and not os.environ.get("GEMINI_API_KEY"):
+            os.environ["GEMINI_API_KEY"] = prof.api_key_1
+
+        # 2. Activate native framework theme
+        self._apply_native_theme(self.accent_theme)
+        self._refresh_status()
 
         self._log_process("[init] system ready")
 
@@ -273,6 +409,12 @@ class AllyApp(App):
             self.action_open_api_key()
         else:
             self._boot()
+
+    def _apply_native_theme(self, theme_name: str):
+        """Switches Textual framework theme globally ($primary, $accent, $background)."""
+        clean = theme_name if theme_name in NATIVE_THEMES else "purple"
+        self.theme = f"ally-{clean}"
+        self.accent_theme = clean
 
     def _boot(self):
         log = self.query_one("#log", RichLog)
@@ -282,8 +424,7 @@ class AllyApp(App):
         try:
             agent.reset_client()
             self.chat = agent.new_chat()
-            log.write(f"[bold #ffffff]Ally Terminal[/] [dim #555555]v1.0.4[/] · [dim #555555]model:[/] [bold #ffffff]{STATE.model}[/] · [dim #555555]root:[/] [bold #aaaaaa]{STATE.root.name}[/]")
-            log.write("[dim #444444]shortcuts: F2 model · F3 prep · F4 usage · Ctrl+K keys · Ctrl+B explorer · Ctrl+P process[/]\n")
+            log.write(f"[bold #ffffff]Ally Terminal[/] [dim #555555]v1.0.5[/] · [dim #555555]model:[/] [bold #ffffff]{STATE.model}[/] · [dim #555555]root:[/] [bold #aaaaaa]{STATE.root.name}[/]")
             self._log_process(f"[active] {STATE.model}")
         except Exception as e:
             log.write(format_clean_error(e, STATE.model))
@@ -293,6 +434,7 @@ class AllyApp(App):
         self.query_one("#badge-model", Static).update(f"model: [bold #ffffff]{STATE.model}[/]")
         self.query_one("#badge-mode", Static).update(f"mode: [bold #cccccc]{STATE.mode}[/]")
         self.query_one("#badge-key", Static).update(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]")
+        self.query_one("#badge-theme", Static).update(f"theme: [bold]{self.accent_theme}[/]")
         self.query_one("#badge-root", Static).update(f"root: [dim #555555]{STATE.root.name}[/]")
 
     def _set_activity(self, state: str):
@@ -300,7 +442,7 @@ class AllyApp(App):
         if state == "thinking":
             badge.update("[bold #ffff00][thinking][/]")
         elif state == "streaming":
-            badge.update("[bold #00d2ff][streaming][/]")
+            badge.update("[bold #ffffff][streaming][/]")
         elif state == "executing":
             badge.update("[bold #ffaa00][executing][/]")
         else:
@@ -317,6 +459,19 @@ class AllyApp(App):
 
     def action_toggle_process(self):
         self.query_one("#process-panel").toggle_class("hidden")
+
+    def action_open_palette(self):
+        def _on_theme_selected(theme_name: str):
+            if theme_name:
+                self._apply_native_theme(theme_name)
+                prof = load_profile()
+                prof.accent_theme = theme_name
+                save_profile(prof)
+                self._refresh_status()
+                log = self.query_one("#log", RichLog)
+                log.write(f"[dim #888888]Native framework theme switched to [bold]{theme_name}[/].[/]\n")
+                self._log_process(f"[theme] {theme_name}")
+        self.push_screen(ThemePaletteModal(), _on_theme_selected)
 
     def action_open_api_key(self):
         def _on_key_set(saved: bool):
@@ -367,9 +522,12 @@ class AllyApp(App):
             "  [bold #ffffff]F4[/]              Token usage & key statistics\n"
             "  [bold #ffffff]Ctrl+B[/]          Toggle project explorer\n"
             "  [bold #ffffff]Ctrl+P[/]          Toggle process monitor\n"
+            "  [bold #ffffff]Ctrl+T[/]          Accent theme palette\n"
             "  [bold #ffffff]Ctrl+K[/]          Configure dual API keys\n"
             "  [bold #ffffff]Ctrl+O[/]          Developer profile settings\n"
             "  [bold #ffffff]Ctrl+Q[/]          Exit Ally\n\n"
+            "  /theme <name>     Change theme (purple, amber, monochrome, emerald, cobalt, cyan)\n"
+            "  /palette          Open theme palette switcher\n"
             "  /usage            View token analytics\n"
             "  /key              Set Gemini API keys\n"
             "  /model <name>     Switch model\n"
@@ -377,8 +535,8 @@ class AllyApp(App):
             "  /accept           Set accept mode (approval)\n"
             "  /auto             Set auto mode (autonomous)\n"
             "  /reset            Reset chat conversation",
-            title="[#555555]commands[/]",
-            border_style="#1a1a1a",
+            title="[#444444]commands[/]",
+            border_style="#141414",
             padding=(1, 2),
         )
         log.write(help_panel)
@@ -405,19 +563,19 @@ class AllyApp(App):
         if name == "write_file":
             body = args.get("content", "")
             preview = body[:600] + ("\n... (truncated)" if len(body) > 600 else "")
-            panel = Panel(preview, title=f"[#ffaa00]write:[/] {path}", border_style="#ffaa00")
+            panel = Panel(preview, title=f"write: {path}", border_style="#444444")
             log.write(panel)
         elif name == "patch_file":
             preview = f"--- OLD ---\n{args.get('old','')[:250]}\n--- NEW ---\n{args.get('new','')[:250]}"
-            panel = Panel(preview, title=f"[#ffaa00]patch:[/] {path}", border_style="#ffaa00")
+            panel = Panel(preview, title=f"patch: {path}", border_style="#444444")
             log.write(panel)
         elif name == "delete_file":
-            panel = Panel(f"Delete file: {path}", title="[#ff4444]delete[/]", border_style="#ff4444")
+            panel = Panel(f"Delete file: {path}", title="delete", border_style="#ff4444")
             log.write(panel)
         else:
-            log.write(f"[#ffaa00]{name}:[/] {args}")
+            log.write(f"[#888888]{name}:[/] {args}")
 
-        log.write("[bold #ffaa00]Approve change? (y/n)[/]")
+        log.write("[bold #ffffff]Approve change? (y/n)[/]")
         self._approval_future = asyncio.get_running_loop().create_future()
         return await self._approval_future
 
@@ -449,8 +607,6 @@ class AllyApp(App):
     @work(exclusive=True)
     async def _execute_turn_worker(self, text: str):
         log = self.query_one("#log", RichLog)
-        
-        # Clean terminal prompt line (no oversized box)
         log.write(f"\n[dim #555555]you>[/] [bold #ffffff]{text}[/]")
         self._log_process(f"[prompt] '{text[:18]}...'")
 
@@ -475,7 +631,7 @@ class AllyApp(App):
             )
             full_reply = "".join(buffer)
             if full_reply:
-                md_rendered = Markdown(full_reply)
+                md_rendered = Markdown(full_reply, inline_code_lexer="text", code_theme="monokai")
                 panel = Panel(
                     md_rendered,
                     title=f"[dim #555555]ally ({STATE.model})[/]",
@@ -507,6 +663,22 @@ class AllyApp(App):
 
         if cmd == "/help":
             self.action_show_help()
+        elif cmd == "/palette":
+            self.action_open_palette()
+        elif cmd == "/theme":
+            if not arg:
+                log.write(f"[#555555]Current theme:[/] {self.accent_theme} · Available: {', '.join(NATIVE_THEMES.keys())}\n")
+                return
+            if arg in NATIVE_THEMES:
+                self._apply_native_theme(arg)
+                prof = load_profile()
+                prof.accent_theme = arg
+                save_profile(prof)
+                self._refresh_status()
+                log.write(f"[dim #888888]Framework theme switched to [bold]{arg}[/].[/]\n")
+                self._log_process(f"[theme] {arg}")
+            else:
+                log.write(f"[#ff4444]Unknown theme '{arg}'. Choose from: {', '.join(NATIVE_THEMES.keys())}[/]\n")
         elif cmd == "/usage":
             self.action_open_usage()
         elif cmd == "/key":
@@ -530,7 +702,7 @@ class AllyApp(App):
             self._refresh_status()
             log.write(f"[#00ff66]Mode updated to {STATE.mode}[/]\n")
         elif cmd == "/status":
-            log.write(f"user: {STATE.username} | mode: {STATE.mode} | model: {STATE.model} | key: {STATE.active_key_index}/2 | root: {STATE.root.name}\n")
+            log.write(f"user: {STATE.username} | mode: {STATE.mode} | model: {STATE.model} | theme: {self.accent_theme} | key: {STATE.active_key_index}/2 | root: {STATE.root.name}\n")
         elif cmd == "/reset":
             self._reset_chat("Session context reset.")
         elif cmd == "/quit":
