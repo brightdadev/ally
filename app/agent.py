@@ -1,5 +1,5 @@
 """
-LLM Agent with conversational consent guardrails, dual-key rotation, and zero assumptions.
+LLM Agent with conversational consent, .allyignore defense, and friendly step updates.
 Author: Bright da dev
 Version: 1.1.0
 """
@@ -12,6 +12,7 @@ from google.genai import types
 
 from app.state import STATE
 from app import tools
+from app.ignore import is_ignored
 from context.skills import SKILLS
 from context.memory import read_memory
 from user.onboarding import load_profile
@@ -78,11 +79,10 @@ def _load_ground_rules() -> str:
 
 def _get_workspace_snapshot() -> str:
     root = STATE.root.resolve()
-    ignored = {".git", "node_modules", "__pycache__", ".venv", "venv", ".egg-info", "dist", "build"}
     try:
         entries = sorted(root.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
-        lines = [f"{'d' if e.is_dir() else 'f'} {e.name}" for e in entries if e.name not in ignored]
-        return "\n".join(lines[:45])
+        filtered = [f"{'d' if e.is_dir() else 'f'} {e.name}" for e in entries if not is_ignored(e, root)]
+        return "\n".join(filtered[:45])
     except Exception:
         return "(empty or inaccessible)"
 
@@ -125,7 +125,8 @@ def _system_prompt() -> str:
         f"1. ZERO ASSUMPTIONS: You must NEVER invent a project, tech stack, or feature on your own.\n"
         f"2. REQUIREMENT ALIGNMENT FIRST: When {username} asks to build, create, or design something new, you MUST engage in dialogue: ask what the vision is, what stack they prefer, and what requirements they have. Present a concise plan and ask for approval.\n"
         f"3. NO UNPROMPTED WRITES: Do NOT call write_file or patch_file until {username} has explicitly approved your plan or specifically ordered you to write code.\n"
-        f"4. ZERO DISCOVERY WASTE: You already have the workspace overview above; do not call exploration tools for simple queries."
+        f"4. ZERO DISCOVERY WASTE: You already have the workspace overview above; do not call exploration tools for simple queries.\n"
+        f"5. SECURITY & SECRETS: Never attempt to read, write, or reveal files protected by .allyignore (like .env files, private keys, or passwords)."
     )
 
     return "\n\n---\n\n".join(parts)
@@ -135,12 +136,12 @@ def _compile_tool_definitions():
     core_tools = [
         types.FunctionDeclaration(
             name="read_file",
-            description="Read a file's full contents safely.",
+            description="Read a file's full contents safely. Protected by .allyignore.",
             parameters=types.Schema(type=types.Type.OBJECT, properties={"path": types.Schema(type=types.Type.STRING)}, required=["path"]),
         ),
         types.FunctionDeclaration(
             name="write_file",
-            description="Create or overwrite a file safely.",
+            description="Create or overwrite a file safely. Protected by .allyignore.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={"path": types.Schema(type=types.Type.STRING), "content": types.Schema(type=types.Type.STRING)},
@@ -149,7 +150,7 @@ def _compile_tool_definitions():
         ),
         types.FunctionDeclaration(
             name="patch_file",
-            description="Replace one occurrence of 'old' with 'new' in a file.",
+            description="Replace one occurrence of 'old' with 'new' in a file. Protected by .allyignore.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={"path": types.Schema(type=types.Type.STRING), "old": types.Schema(type=types.Type.STRING), "new": types.Schema(type=types.Type.STRING)},
@@ -158,17 +159,17 @@ def _compile_tool_definitions():
         ),
         types.FunctionDeclaration(
             name="delete_file",
-            description="Delete a file safely.",
+            description="Delete a file safely. Protected by .allyignore.",
             parameters=types.Schema(type=types.Type.OBJECT, properties={"path": types.Schema(type=types.Type.STRING)}, required=["path"]),
         ),
         types.FunctionDeclaration(
             name="list_dir",
-            description="List directory entries for subdirectories not present in the top-level snapshot.",
+            description="List directory entries. Automatically filters files protected by .allyignore.",
             parameters=types.Schema(type=types.Type.OBJECT, properties={"path": types.Schema(type=types.Type.STRING)}),
         ),
         types.FunctionDeclaration(
             name="run_command",
-            description="Execute a shell or terminal command in the project root and inspect exit code, stdout, and stderr.",
+            description="Execute a non-interactive shell command in the project root and inspect exit code, stdout, and stderr.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
@@ -212,12 +213,30 @@ def dispatch(name: str, args: dict):
     return f"ERROR: unknown tool '{name}'"
 
 
+def _format_friendly_step(name: str, args: dict) -> str:
+    """Format tool actions into clean, friendly human phrasing."""
+    if name == "read_file":
+        return f"Ally is reading {args.get('path', 'file')}"
+    if name == "write_file":
+        return f"Ally is writing {args.get('path', 'file')}"
+    if name == "patch_file":
+        return f"Ally is updating {args.get('path', 'file')}"
+    if name == "run_command":
+        cmd = args.get('command', '')
+        return f"Ally is running: {cmd[:28]}..." if len(cmd) > 28 else f"Ally is running: {cmd}"
+    if name == "list_dir":
+        return "Ally is checking workspace files"
+    if name == "record_decision":
+        return "Ally is updating project memory"
+    return f"Ally is working ({name})"
+
+
 async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step=None):
     current_input = user_text_or_parts
 
     while True:
         if on_step:
-            on_step(f"Calling {STATE.model} (Key #{STATE.active_key_index})...")
+            on_step(f"Ally is thinking of a response...")
 
         queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -243,12 +262,15 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
                 err = str(payload).lower()
                 if ("429" in err or "quota" in err or "resource_exhausted" in err) and rotate_to_backup_key():
                     if on_step:
-                        on_step(f"Quota hit. Auto-rotated to Key #{STATE.active_key_index}!")
+                        on_step(f"Quota reached. Auto-rotated to Key #{STATE.active_key_index}!")
                     chat = new_chat()
                     return await run_turn(chat, user_text_or_parts, on_token, request_approval, on_step)
 
                 if "503" in err or "unavailable" in err:
-                    raise ServerUnavailableException(str(payload))
+                    if on_step:
+                        on_step("Google servers busy. Ally is retrying in 2s...")
+                    await asyncio.sleep(2)
+                    return await run_turn(chat, user_text_or_parts, on_token, request_approval, on_step)
                 raise payload
             elif msg_type == "done":
                 break
@@ -264,7 +286,7 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
                     if is_first_token:
                         is_first_token = False
                         if on_step:
-                            on_step("Streaming response...")
+                            on_step("Ally is writing response...")
                     on_token(text)
 
                 if chunk.function_calls:
@@ -286,7 +308,7 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
             args = dict(call.args or {})
 
             if on_step:
-                on_step(f"Tool request: {name}")
+                on_step(_format_friendly_step(name, args))
 
             if STATE.mode == "plan" and name in WRITE_TOOLS:
                 result = "BLOCKED: plan mode - read tools only."
@@ -295,16 +317,10 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
                     on_step(f"Awaiting approval for {name}...")
                 approved = await request_approval(name, args)
                 if approved:
-                    if on_step:
-                        on_step(f"Executing {name}...")
                     result = await asyncio.to_thread(dispatch, name, args)
                 else:
-                    if on_step:
-                        on_step(f"Denied: {name}")
                     result = "DENIED by user."
             else:
-                if on_step:
-                    on_step(f"Executing: {name}...")
                 result = await asyncio.to_thread(dispatch, name, args)
 
             parts.append(
@@ -314,4 +330,4 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
         current_input = parts
 
     if on_step:
-        on_step("Turn completed.")
+        on_step("Ally is finished.")

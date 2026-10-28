@@ -1,5 +1,5 @@
 """
-Cleaned-Up Pitch-Black Terminal IDE for Ally with Live Animated Thinking Indicator.
+Cleaned-Up Pitch-Black Terminal IDE for Ally with Friendly Human Phrasing.
 Author: Bright da dev
 Version: 1.1.0
 """
@@ -29,6 +29,7 @@ from textual import work
 from app import agent
 from app.state import STATE
 from app.model.router import ROUTER
+from app.ignore import is_ignored, create_default_allyignore
 from user.onboarding import profile_exists, load_profile
 from tui.screens import (
     OnboardingModal,
@@ -55,23 +56,23 @@ def format_clean_error(err: Exception, current_model: str) -> Panel:
                 pass
 
         body = (
-            f"[bold #ff4444]Quota Limit Reached for {current_model}[/]{limit_note}\n\n"
-            f"[#666666]Action:[/] Press [bold #ffffff]F2[/] to switch model, or [bold #ffffff]Ctrl+K[/] to configure Backup Key (Key 2)."
+            f"[bold #ff4444]Daily Quota Limit Reached for {current_model}[/]{limit_note}\n\n"
+            f"[#666666]What to do:[/] Press [bold #ffffff]F2[/] to switch model, or press [bold #ffffff]Ctrl+K[/] to configure Backup Key (Key 2)."
         )
-        return Panel(body, title="[#ff4444]API Quota (429)[/]", border_style="#331111", padding=(1, 2))
+        return Panel(body, title="[#ff4444]Quota Limit (429)[/]", border_style="#331111", padding=(1, 2))
 
     if "503" in err_str or "unavailable" in err_lower:
         body = (
-            f"[bold #ff4444]Service Unavailable (503)[/]\n\n"
-            f"Model [bold]{current_model}[/] is currently experiencing high server demand.\n"
-            f"[#666666]Action:[/] Retry in a few seconds or press [bold #ffffff]F2[/] to select another model."
+            f"[bold #ff4444]Google Servers Are Currently Busy (503)[/]\n\n"
+            f"The server is experiencing high demand. Ally retried automatically, but the servers are still saturated.\n"
+            f"[#666666]What to do:[/] Press [bold #ffffff]F2[/] to select a faster model, or ask your question again in a moment."
         )
-        return Panel(body, title="[#ff4444]Service Unavailable (503)[/]", border_style="#331111", padding=(1, 2))
+        return Panel(body, title="[#ff4444]Server Busy (503)[/]", border_style="#331111", padding=(1, 2))
 
     if "10053" in err_str:
         body = (
-            "[bold #ffaa00]Connection Reset by Host[/]\n\n"
-            "The network socket connection dropped. Session has been automatically reconnected."
+            "[bold #ffaa00]Connection Reset[/]\n\n"
+            "The network connection dropped briefly. Your session is reconnected and ready."
         )
         return Panel(body, title="[#ffaa00]Network Reset[/]", border_style="#332200", padding=(1, 2))
 
@@ -84,14 +85,14 @@ def format_clean_error(err: Exception, current_model: str) -> Panel:
     else:
         clean_msg = err_str[:160]
 
-    body = f"[bold #ff4444]Error:[/] {clean_msg}"
+    body = f"[bold #ff4444]Notice:[/] {clean_msg}"
     return Panel(body, title="[#ff4444]Execution Notice[/]", border_style="#331111", padding=(1, 2))
 
 
 class WorkspaceTree(DirectoryTree):
     def filter_paths(self, paths):
-        ignored = {".git", "__pycache__", ".venv", "venv", ".egg-info", "dist", "build"}
-        return [p for p in paths if p.name not in ignored]
+        root = STATE.root.resolve()
+        return [p for p in paths if not is_ignored(p, root)]
 
 
 class AllyApp(App):
@@ -245,7 +246,7 @@ class AllyApp(App):
             # Center: Main Workspace
             Vertical(
                 Horizontal(
-                    Static("[bold #00ffaa][ready][/]", id="badge-status", classes="badge-pill"),
+                    Static("[bold #00ffaa]Ally is ready[/]", id="badge-status", classes="badge-pill"),
                     Static(f"model: [bold #ffffff]{STATE.model}[/]", id="badge-model", classes="badge-pill"),
                     Static(f"mode: [bold #00ffaa]partner[/]", id="badge-mode", classes="badge-pill"),
                     Static(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]", id="badge-key", classes="badge-pill"),
@@ -273,6 +274,9 @@ class AllyApp(App):
     def on_mount(self):
         self.query_one("#prompt").focus()
 
+        # Initialize .allyignore defense in project root if missing
+        create_default_allyignore(STATE.root)
+
         if profile_exists():
             prof = load_profile()
             STATE.username = prof.username
@@ -285,14 +289,14 @@ class AllyApp(App):
                 os.environ["GEMINI_API_KEY"] = prof.api_key_1
             self._refresh_status()
 
-        self._log_process("[init] system ready")
+        self._log_process("Ally is ready")
 
         if not os.environ.get("GEMINI_API_KEY") and not agent.get_active_key():
             self.action_open_api_key()
         else:
             self._boot()
 
-    def _get_git_branch(self) -> str:
+    def _get_git_branch() -> str:
         try:
             r = subprocess.run(
                 ["git", "branch", "--show-current"],
@@ -325,6 +329,7 @@ class AllyApp(App):
                 f"[bold #ffffff]ALLY[/]  [dim #666666]v1.1.0 — Engineering Partner[/]\n\n"
                 f"  [dim #777777]Workspace:[/]   [bold #ffffff]{STATE.root.name}[/]{branch_str}\n"
                 f"  [dim #777777]Mode:[/]        {mode_badge} [dim #555555](collaborative first, zero unsolicited edits)[/]\n"
+                f"  [dim #777777]Security:[/]    [bold #00ffaa].allyignore active[/] [dim #555555](secrets & .env protected)[/]\n"
                 f"  [dim #777777]Model:[/]       [bold #ffffff]{STATE.model}[/] [dim #555555]•[/] [dim #888888]{key_info}[/]\n\n"
                 f"[dim #888888]Ready when you are. Tell me what we're building, or explore shortcuts:[/]\n"
                 f"[dim #555555]  F1[/] Guide   [dim #555555]F2[/] Models   [dim #555555]F4[/] Usage   [dim #555555]Ctrl+B[/] Files   [dim #555555]Ctrl+P[/] Processes"
@@ -338,10 +343,10 @@ class AllyApp(App):
             )
             log.write(welcome_card)
             log.write("\n")
-            self._log_process(f"[active] {STATE.model}")
+            self._log_process(f"Active model: {STATE.model}")
         except Exception as e:
             log.write(format_clean_error(e, STATE.model))
-            self._log_process("[error] init failed")
+            self._log_process("Startup notice: model unavailable")
 
     def _refresh_status(self):
         mode_label = "[bold #00ffaa]partner[/]" if STATE.mode == "auto" else f"[bold #cccccc]{STATE.mode}[/]"
@@ -350,7 +355,7 @@ class AllyApp(App):
         self.query_one("#badge-key", Static).update(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]")
         self.query_one("#badge-root", Static).update(f"root: [dim #888888]{STATE.root.name}[/]")
 
-    def _start_thinking_animation(self, label: str = "Ally is working"):
+    def _start_thinking_animation(self, label: str = "Ally is thinking of a response"):
         indicator = self.query_one("#thinking-indicator", Static)
         indicator.add_class("active")
         self._anim_frame = 0
@@ -366,7 +371,7 @@ class AllyApp(App):
             if not self._busy:
                 return
             idx = self._anim_frame % len(frames)
-            indicator.update(f"{frames[idx]} [dim #888888]{label}...[/]")
+            indicator.update(f"{frames[idx]} [dim #aaaaaa]{label}...[/]")
             self._anim_frame += 1
 
         _tick()
@@ -385,13 +390,13 @@ class AllyApp(App):
     def _set_activity(self, state: str):
         badge = self.query_one("#badge-status", Static)
         if state == "thinking":
-            badge.update("[bold #ffff00][thinking][/]")
+            badge.update("[bold #ffff00]Ally is thinking...[/]")
         elif state == "streaming":
-            badge.update("[bold #00d2ff][streaming][/]")
+            badge.update("[bold #00d2ff]Ally is writing...[/]")
         elif state == "executing":
-            badge.update("[bold #ffaa00][executing][/]")
+            badge.update("[bold #ffaa00]Ally is working...[/]")
         else:
-            badge.update("[bold #00ffaa][ready][/]")
+            badge.update("[bold #00ffaa]Ally is ready[/]")
 
     def _log_process(self, message: str):
         plog = self.query_one("#process-log", RichLog)
@@ -410,7 +415,7 @@ class AllyApp(App):
             if saved:
                 log = self.query_one("#log", RichLog)
                 log.write("[bold #00ffaa]API Keys configured successfully.[/]\n")
-                self._log_process("[config] keys updated")
+                self._log_process("API keys updated")
                 self._boot()
         self.push_screen(ApiKeyModal(), _on_key_set)
 
@@ -423,7 +428,7 @@ class AllyApp(App):
                 STATE.model = new_model
                 self._refresh_status()
                 self._reset_chat(f"Switched model to {new_model}.")
-                self._log_process(f"[switch] {new_model}")
+                self._log_process(f"Switched model: {new_model}")
         self.push_screen(ModelSelectModal(STATE.model, is_quota_alert=False), _on_switched)
 
     def action_open_prep(self):
@@ -433,7 +438,7 @@ class AllyApp(App):
                 self._reset_chat("Project brief and memory initialized.")
                 tree = self.query_one("#file-tree", WorkspaceTree)
                 tree.reload()
-                self._log_process("[prep] complete")
+                self._log_process("Project brief initialized")
         self.push_screen(ProjectPrepModal(), _on_closed)
 
     def action_open_onboarding(self):
@@ -441,7 +446,7 @@ class AllyApp(App):
             if saved:
                 self._refresh_status()
                 self._reset_chat("Profile preferences applied.")
-                self._log_process("[profile] updated")
+                self._log_process("Profile updated")
         self.push_screen(OnboardingModal(), _on_closed)
 
     def action_show_help(self):
@@ -511,11 +516,11 @@ class AllyApp(App):
             return
 
         if self.chat is None:
-            self.query_one("#log", RichLog).write("[#ff4444]Ally not initialized. Press Ctrl+K to enter API keys.[/]\n")
+            self.query_one("#log", RichLog).write("[#ff4444]Ally is not initialized. Press Ctrl+K to enter your API key.[/]\n")
             return
 
         if self._busy:
-            self.query_one("#log", RichLog).write("[#ffaa00]Ally is busy working. Please wait for current turn to complete.[/]\n")
+            self.query_one("#log", RichLog).write("[#ffaa00]Ally is currently working on your request. Please wait a moment...[/]\n")
             return
 
         self._execute_turn_worker(text)
@@ -525,11 +530,11 @@ class AllyApp(App):
         log = self.query_one("#log", RichLog)
 
         log.write(f"\n[bold #00ccff]you[/] [dim #555555]›[/] [bold #ffffff]{text}[/]\n")
-        self._log_process(f"[prompt] '{text[:22]}...'")
+        self._log_process(f"Prompt: '{text[:22]}...'")
 
         self._busy = True
         self._set_activity("thinking")
-        self._start_thinking_animation("Ally is thinking")
+        self._start_thinking_animation("Ally is thinking of a response")
 
         buffer = []
 
@@ -537,13 +542,13 @@ class AllyApp(App):
             buffer.append(chunk)
 
         def _on_step(step_name: str):
-            if "run_command" in step_name or "executing" in step_name.lower():
+            if "running" in step_name.lower() or "writing" in step_name.lower() or "updating" in step_name.lower():
                 self._set_activity("executing")
-                self._start_thinking_animation("Executing command")
-            elif "calling" in step_name.lower():
+                self._start_thinking_animation(step_name)
+            elif "thinking" in step_name.lower():
                 self._set_activity("thinking")
-                self._start_thinking_animation("Synthesizing response")
-            self._log_process(f"[step] {step_name}")
+                self._start_thinking_animation(step_name)
+            self._log_process(step_name)
 
         try:
             await agent.run_turn(
@@ -571,13 +576,8 @@ class AllyApp(App):
             self._stop_thinking_animation()
             error_card = format_clean_error(e, STATE.model)
             log.write(error_card)
-            self._log_process("[error] turn failed")
-
-            try:
-                agent.reset_client()
-                self.chat = agent.new_chat()
-            except Exception:
-                pass
+            self._log_process("Turn failed: server busy")
+            # CRITICAL: Do NOT reset self.chat so conversation memory is completely preserved
         finally:
             self._stop_thinking_animation()
             self._busy = False
@@ -597,7 +597,7 @@ class AllyApp(App):
         elif cmd == "/prep":
             self.action_open_prep()
         elif cmd == "/models":
-            log.write(f"[#555555]Catalog:[/] {', '.join(ROUTER.list_models())}\n")
+            log.write(f"[#555555]Available Models:[/] {', '.join(ROUTER.list_models())}\n")
         elif cmd == "/model":
             if not arg:
                 log.write(f"Active model: {STATE.model}\n")
@@ -614,9 +614,9 @@ class AllyApp(App):
             log.write(f"[#00ffaa]Mode updated to {STATE.mode}[/]\n")
         elif cmd == "/status":
             branch = self._get_git_branch()
-            log.write(f"user: {STATE.username} | mode: {STATE.mode} | model: {STATE.model} | branch: {branch or 'none'} | key: #{STATE.active_key_index}\n")
+            log.write(f"User: {STATE.username} | Mode: {STATE.mode} | Model: {STATE.model} | Branch: {branch or 'none'} | Key: #{STATE.active_key_index}\n")
         elif cmd == "/reset":
-            self._reset_chat("Session context reset.")
+            self._reset_chat("Conversation context reset.")
         elif cmd == "/quit":
             self.exit()
         else:
