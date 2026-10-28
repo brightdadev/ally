@@ -1,0 +1,31 @@
+# ==============================================================================
+# Ally Ignore Shield (.allyignore)
+# Author: Bright da dev
+#
+# Files and directories listed here are strictly invisible and inaccessible
+# to Ally. Prevents accidental token leaks and heavy directory traversal.
+# ==============================================================================
+
+# Secrets & Environment (NEVER ACCESSIBLE)
+.env
+.env.*
+*.env
+
+# Dependency Folders
+node_modules/
+node_modules/*
+
+# Python & Build Artifacts
+__pycache__/
+*.pyc
+dist/
+build/
+*.egg-info/
+
+# Virtual Environments
+.venv/
+venv/
+
+# Internal Ally State & Git
+.git/
+.ally/

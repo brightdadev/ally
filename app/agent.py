@@ -1,5 +1,5 @@
 """
-LLM Agent with dual-key rotation and token usage collection.
+LLM Agent with smart direct-command bypass and real-time streaming.
 Author: Bright da dev
 """
 import asyncio
@@ -14,9 +14,30 @@ from context.skills import SKILLS
 from context.memory import read_memory
 from user.onboarding import load_profile
 
-
-WRITE_TOOLS = {"write_file", "patch_file", "delete_file"}
+WRITE_TOOLS = {"write_file", "patch_file", "delete_file", "run_command", "stop_server"}
 _PERSISTENT_CLIENT = None
+
+DIRECT_ACTION_VERBS = (
+    "create", "make", "run", "do", "install", "build", "add", "write",
+    "delete", "remove", "setup", "start", "exec", "update", "patch", "fix",
+    "clean", "open", "mkdir", "touch"
+)
+
+
+def is_direct_command(text: str) -> bool:
+    """Detects if user gave an explicit command where permission should be skipped."""
+    clean = text.lower().strip()
+    if clean.startswith("ally "):
+        clean = clean[5:].strip()
+
+    if "run it" in clean or "do it" in clean or "just do it" in clean:
+        return True
+
+    words = clean.split()
+    if words and words[0] in DIRECT_ACTION_VERBS:
+        return True
+
+    return False
 
 
 class QuotaException(Exception):
@@ -78,6 +99,7 @@ def _system_prompt() -> str:
     parts = [
         _load_ground_rules(),
         f"OPERATIONAL STATE:\n- User: {STATE.username}\n- Mode: {STATE.mode}\n- Model: {STATE.model}\n- Active Key: #{STATE.active_key_index}\n- Project Root: {STATE.root}",
+        "DIRECTIVE: When the user gives a direct command to create, run, install, or write, execute the tool directly without unnecessary hesitation."
     ]
 
     brief_file = STATE.root / "project.md"
@@ -123,8 +145,41 @@ def _compile_tool_definitions():
         ),
         types.FunctionDeclaration(
             name="list_dir",
-            description="List directory entries.",
+            description="List directory entries, automatically filtering out .allyignore paths.",
             parameters=types.Schema(type=types.Type.OBJECT, properties={"path": types.Schema(type=types.Type.STRING)}),
+        ),
+        types.FunctionDeclaration(
+            name="run_command",
+            description="Execute CLI commands (npm install, npm run dev, pytest, etc.). Dev servers run persistently in background with preview URL extraction.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "command": types.Schema(type=types.Type.STRING, description="The CLI command to execute."),
+                    "timeout": types.Schema(type=types.Type.INTEGER, description="Timeout in seconds for short commands (default: 30)"),
+                },
+                required=["command"],
+            ),
+        ),
+        types.FunctionDeclaration(
+            name="get_server_logs",
+            description="Retrieve recent live logs from an active background dev server to inspect errors.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"pid": types.Schema(type=types.Type.INTEGER, description="Optional server PID.")},
+            ),
+        ),
+        types.FunctionDeclaration(
+            name="stop_server",
+            description="Stop an active background development server by PID.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"pid": types.Schema(type=types.Type.INTEGER, description="Optional server PID.")},
+            ),
+        ),
+        types.FunctionDeclaration(
+            name="list_servers",
+            description="List all active background development servers and their preview URLs.",
+            parameters=types.Schema(type=types.Type.OBJECT, properties={}),
         ),
     ]
     skill_tools = SKILLS.get_declarations()
@@ -162,6 +217,11 @@ def dispatch(name: str, args: dict):
 
 async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step=None):
     current_input = user_text_or_parts
+
+    # Detect if user prompt was a direct imperative order
+    skip_permission = False
+    if isinstance(user_text_or_parts, str):
+        skip_permission = is_direct_command(user_text_or_parts)
 
     while True:
         if on_step:
@@ -234,11 +294,19 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
             args = dict(call.args or {})
 
             if on_step:
-                on_step(f"Tool request: {name}")
+                on_step(f"Executing: {name}")
 
-            if STATE.mode == "plan" and name in WRITE_TOOLS:
+            # Smart Intent: If direct order OR auto mode, execute directly without asking!
+            if STATE.mode == "auto" or skip_permission:
+                if on_step:
+                    on_step(f"Direct order: running {name}...")
+                result = await asyncio.to_thread(dispatch, name, args)
+
+            elif STATE.mode == "plan" and name in WRITE_TOOLS:
                 result = "BLOCKED: plan mode - read tools only."
+
             elif STATE.mode == "accept" and name in WRITE_TOOLS:
+                # Speculative action not directly commanded by user -> ask for approval
                 if on_step:
                     on_step(f"Awaiting approval for {name}...")
                 approved = await request_approval(name, args)
@@ -250,9 +318,8 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
                     if on_step:
                         on_step(f"Denied: {name}")
                     result = "DENIED by user."
+
             else:
-                if on_step:
-                    on_step(f"Executing: {name}...")
                 result = await asyncio.to_thread(dispatch, name, args)
 
             parts.append(

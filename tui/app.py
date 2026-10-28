@@ -1,9 +1,10 @@
 """
-Pitch-Black Terminal IDE with Textual Native Theme Engine.
+Pitch-Black Terminal IDE with Zero-Collision Layout & ANSI SGR Sanitization.
 Author: Bright da dev
 """
 import asyncio
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from app import agent
 from app.state import STATE
 from app.model.router import ROUTER
 from user.onboarding import profile_exists, load_profile, save_profile
+from tui.theme import get_theme, THEMES
 from tui.screens import (
     OnboardingModal,
     ProjectPrepModal,
@@ -38,9 +40,6 @@ from tui.screens import (
     ThemePaletteModal,
 )
 
-# =============================================================================
-# TEXTUAL NATIVE FRAMEWORK THEMES (Zero Blue Leaks Framework-Wide)
-# =============================================================================
 NATIVE_THEMES = {
     "purple": Theme(
         name="ally-purple",
@@ -98,6 +97,16 @@ NATIVE_THEMES = {
     ),
 }
 
+PREVIEW_URL_REGEX = re.compile(r"PREVIEW URL:\s*(https?://[^\s]+)", re.IGNORECASE)
+ANSI_ESCAPE_FILTER = re.compile(r"\^?\[\[?<\d+;\d+;\d+[Mm]?|[\x1b\x00-\x1f]")
+
+WINDOWS_JUNCTIONS_AND_NOISE = {
+    ".git", "__pycache__", ".venv", "venv", ".egg-info", "dist", "build",
+    "node_modules", "AppData", "Application Data", "Local Settings",
+    "Cookies", "NetHood", "PrintHood", "Recent", "SendTo", "Start Menu",
+    "Templates", "My Documents", "Searches", "Saved Games"
+}
+
 
 def format_clean_error(err: Exception, current_model: str) -> Panel:
     err_str = str(err)
@@ -148,10 +157,17 @@ def format_clean_error(err: Exception, current_model: str) -> Panel:
     return Panel(body, title="[#ff4444]Execution Error[/]", border_style="#331111", padding=(1, 2))
 
 
+class CleanInput(Input):
+    """Input widget that sanitizes raw terminal SGR mouse escape sequences."""
+    def insert_text_at_cursor(self, text: str) -> None:
+        clean = ANSI_ESCAPE_FILTER.sub("", text)
+        if clean:
+            super().insert_text_at_cursor(clean)
+
+
 class WorkspaceTree(DirectoryTree):
     def filter_paths(self, paths):
-        ignored = {".git", "__pycache__", ".venv", "venv", ".egg-info", "dist", "build"}
-        return [p for p in paths if p.name not in ignored]
+        return [p for p in paths if p.name not in WINDOWS_JUNCTIONS_AND_NOISE]
 
 
 class AllyApp(App):
@@ -162,6 +178,7 @@ class AllyApp(App):
     Screen {
         layout: vertical;
         background: $background;
+        overflow: hidden;
     }
     ModalScreen {
         background: rgba(0, 0, 0, 0.9);
@@ -169,16 +186,12 @@ class AllyApp(App):
     Header {
         background: $background;
         color: #444444;
-        dock: top;
         height: 1;
-        border-bottom: solid #141414;
     }
     Footer {
         background: $background;
         color: #444444;
-        dock: bottom;
         height: 1;
-        border-top: solid #141414;
     }
     .footer--key {
         background: #0d0d0d;
@@ -188,7 +201,6 @@ class AllyApp(App):
         color: #444444;
     }
 
-    /* BUTTONS: NATIVELY BOUND TO $primary AND $accent */
     Button.-primary {
         background: $primary;
         color: #ffffff;
@@ -207,7 +219,6 @@ class AllyApp(App):
         color: #cccccc;
     }
 
-    /* DROPDOWNS: NATIVELY BOUND TO $primary AND $accent */
     Select {
         background: $background;
         border: none;
@@ -234,18 +245,17 @@ class AllyApp(App):
         text-style: bold;
     }
 
-    /* WORKSPACE LAYOUT */
     #ide-layout {
         height: 1fr;
         layout: horizontal;
         background: $background;
-        overflow-x: hidden;
+        overflow: hidden;
     }
     #sidebar {
         width: 26;
         background: $background;
         border-right: solid #141414;
-        overflow-x: hidden;
+        overflow: hidden;
     }
     #sidebar.hidden {
         display: none;
@@ -254,7 +264,7 @@ class AllyApp(App):
         width: 36;
         background: $background;
         border-left: solid #141414;
-        overflow-x: hidden;
+        overflow: hidden;
     }
     #process-panel.hidden {
         display: none;
@@ -265,7 +275,6 @@ class AllyApp(App):
         color: #444444;
         text-style: bold;
         padding: 0 1;
-        border-bottom: solid #141414;
     }
     #file-tree {
         height: 1fr;
@@ -273,7 +282,6 @@ class AllyApp(App):
         border: none;
         padding: 0 1;
         color: #666666;
-        overflow-x: hidden;
     }
     #process-log {
         height: 1fr;
@@ -281,20 +289,18 @@ class AllyApp(App):
         border: none;
         padding: 0 1;
         color: #555555;
-        overflow-x: hidden;
     }
     #main-panel {
         width: 1fr;
         height: 1fr;
         layout: vertical;
         background: $background;
-        overflow-x: hidden;
+        overflow: hidden;
     }
     #top-breadcrumbs {
         height: 1;
         background: $background;
         padding: 0 1;
-        border-bottom: solid #141414;
     }
     .badge-pill {
         margin-right: 2;
@@ -307,6 +313,7 @@ class AllyApp(App):
         padding: 1 2;
         overflow-x: hidden;
     }
+
     #composer-container {
         height: 3;
         background: $background;
@@ -317,13 +324,7 @@ class AllyApp(App):
         background: $background;
         border: none;
         color: #ffffff;
-    }
-    Input {
-        background: $background;
-        border: solid #1a1a1a;
-    }
-    Input:focus {
-        border: solid $accent;
+        padding: 0 1;
     }
     """
 
@@ -349,42 +350,31 @@ class AllyApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield Horizontal(
-            Vertical(
-                Label("EXPLORER", classes="panel-header"),
-                WorkspaceTree(str(STATE.root), id="file-tree"),
-                id="sidebar",
-            ),
-            Vertical(
-                Horizontal(
-                    Static("[bold #00ff66][ready][/]", id="badge-status", classes="badge-pill"),
-                    Static(f"model: [bold #ffffff]{STATE.model}[/]", id="badge-model", classes="badge-pill"),
-                    Static(f"mode: [bold #cccccc]{STATE.mode}[/]", id="badge-mode", classes="badge-pill"),
-                    Static(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]", id="badge-key", classes="badge-pill"),
-                    Static(f"theme: [bold]{self.accent_theme}[/]", id="badge-theme", classes="badge-pill"),
-                    Static(f"root: [dim #555555]{STATE.root.name}[/]", id="badge-root", classes="badge-pill"),
-                    id="top-breadcrumbs",
-                ),
-                RichLog(id="log", wrap=True, markup=True),
-                Vertical(
-                    Input(placeholder="Ask Ally... (/help, F2 model, F4 stats, ^T palette, ^B explorer)", id="prompt"),
-                    id="composer-container",
-                ),
-                id="main-panel",
-            ),
-            Vertical(
-                Label("PROCESS", classes="panel-header"),
-                RichLog(id="process-log", wrap=True, markup=True),
-                id="process-panel",
-            ),
-            id="ide-layout",
-        )
+        with Horizontal(id="ide-layout"):
+            with Vertical(id="sidebar"):
+                yield Label("EXPLORER", classes="panel-header")
+                yield WorkspaceTree(str(STATE.root), id="file-tree")
+            with Vertical(id="main-panel"):
+                with Horizontal(id="top-breadcrumbs"):
+                    yield Static("[bold #00ff66][ready][/]", id="badge-status", classes="badge-pill")
+                    yield Static(f"model: [bold #ffffff]{STATE.model}[/]", id="badge-model", classes="badge-pill")
+                    yield Static(f"mode: [bold #cccccc]{STATE.mode}[/]", id="badge-mode", classes="badge-pill")
+                    yield Static(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]", id="badge-key", classes="badge-pill")
+                    yield Static(f"theme: [bold]{self.accent_theme}[/]", id="badge-theme", classes="badge-pill")
+                    yield Static(f"root: [dim #555555]{STATE.root.name}[/]", id="badge-root", classes="badge-pill")
+                yield RichLog(id="log", wrap=True, markup=True)
+                with Horizontal(id="composer-container"):
+                    yield CleanInput(placeholder="Ask Ally... (/help, F2 model, F4 stats, ^T palette, ^B explorer)", id="prompt")
+            with Vertical(id="process-panel"):
+                yield Label("PROCESS", classes="panel-header")
+                yield RichLog(id="process-log", wrap=True, markup=True)
         yield Footer()
 
     def on_mount(self):
         self.query_one("#prompt").focus()
+        self.query_one("#log", RichLog).can_focus = False
+        self.query_one("#process-log", RichLog).can_focus = False
 
-        # 1. Register all native framework themes
         for t_obj in NATIVE_THEMES.values():
             self.register_theme(t_obj)
 
@@ -399,7 +389,6 @@ class AllyApp(App):
         if prof.api_key_1 and not os.environ.get("GEMINI_API_KEY"):
             os.environ["GEMINI_API_KEY"] = prof.api_key_1
 
-        # 2. Activate native framework theme
         self._apply_native_theme(self.accent_theme)
         self._refresh_status()
 
@@ -411,7 +400,6 @@ class AllyApp(App):
             self._boot()
 
     def _apply_native_theme(self, theme_name: str):
-        """Switches Textual framework theme globally ($primary, $accent, $background)."""
         clean = theme_name if theme_name in NATIVE_THEMES else "purple"
         self.theme = f"ally-{clean}"
         self.accent_theme = clean
@@ -424,7 +412,7 @@ class AllyApp(App):
         try:
             agent.reset_client()
             self.chat = agent.new_chat()
-            log.write(f"[bold #ffffff]Ally Terminal[/] [dim #555555]v1.0.5[/] · [dim #555555]model:[/] [bold #ffffff]{STATE.model}[/] · [dim #555555]root:[/] [bold #aaaaaa]{STATE.root.name}[/]")
+            log.write(f"[bold #ffffff]Ally Terminal[/] [dim #555555]v1.0.6[/] · [dim #555555]model:[/] [bold #ffffff]{STATE.model}[/] · [dim #555555]root:[/] [bold #aaaaaa]{STATE.root.name}[/]")
             self._log_process(f"[active] {STATE.model}")
         except Exception as e:
             log.write(format_clean_error(e, STATE.model))
@@ -469,7 +457,7 @@ class AllyApp(App):
                 save_profile(prof)
                 self._refresh_status()
                 log = self.query_one("#log", RichLog)
-                log.write(f"[dim #888888]Native framework theme switched to [bold]{theme_name}[/].[/]\n")
+                log.write(f"[dim #888888]Framework theme switched to [bold]{theme_name}[/].[/]\n")
                 self._log_process(f"[theme] {theme_name}")
         self.push_screen(ThemePaletteModal(), _on_theme_selected)
 
@@ -526,6 +514,8 @@ class AllyApp(App):
             "  [bold #ffffff]Ctrl+K[/]          Configure dual API keys\n"
             "  [bold #ffffff]Ctrl+O[/]          Developer profile settings\n"
             "  [bold #ffffff]Ctrl+Q[/]          Exit Ally\n\n"
+            "  /servers          List running background dev servers\n"
+            "  /stopserver [pid] Stop a running background server\n"
             "  /theme <name>     Change theme (purple, amber, monochrome, emerald, cobalt, cyan)\n"
             "  /palette          Open theme palette switcher\n"
             "  /usage            View token analytics\n"
@@ -542,7 +532,7 @@ class AllyApp(App):
         log.write(help_panel)
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected):
-        prompt = self.query_one("#prompt", Input)
+        prompt = self.query_one("#prompt", CleanInput)
         rel_path = event.path.relative_to(STATE.root)
         prompt.value = f"{prompt.value} @{rel_path} ".strip() + " "
         prompt.focus()
@@ -560,7 +550,26 @@ class AllyApp(App):
     async def request_approval(self, name: str, args: dict) -> bool:
         log = self.query_one("#log", RichLog)
         path = args.get("path", "?")
-        if name == "write_file":
+
+        if name == "run_command":
+            cmd = args.get("command", "")
+            panel = Panel(
+                f"[bold #ffffff]{cmd}[/]\n\n[dim #666666]Directory:[/] {STATE.root}",
+                title="[#ffaa00]execute command[/]",
+                border_style="#ffaa00",
+                padding=(1, 2),
+            )
+            log.write(panel)
+        elif name == "stop_server":
+            pid = args.get("pid", "Active Server")
+            panel = Panel(
+                f"[bold #ff4444]Stop background server (PID: {pid})?[/]",
+                title="[#ff4444]stop server[/]",
+                border_style="#ff4444",
+                padding=(1, 2),
+            )
+            log.write(panel)
+        elif name == "write_file":
             body = args.get("content", "")
             preview = body[:600] + ("\n... (truncated)" if len(body) > 600 else "")
             panel = Panel(preview, title=f"write: {path}", border_style="#444444")
@@ -614,6 +623,7 @@ class AllyApp(App):
         self._set_activity("thinking")
 
         buffer = []
+        modified_files = False
 
         def _on_token(chunk: str):
             buffer.append(chunk)
@@ -621,16 +631,35 @@ class AllyApp(App):
         def _on_step(step_name: str):
             self._log_process(f"[step] {step_name}")
 
+        async def _approval_interceptor(name, args):
+            nonlocal modified_files
+            if name in ("write_file", "patch_file", "delete_file"):
+                modified_files = True
+            return await self.request_approval(name, args)
+
         try:
             await agent.run_turn(
                 self.chat,
                 text,
                 _on_token,
-                self.request_approval,
+                _approval_interceptor,
                 on_step=_on_step,
             )
             full_reply = "".join(buffer)
             if full_reply:
+                url_match = PREVIEW_URL_REGEX.search(full_reply)
+                if url_match:
+                    preview_url = url_match.group(1)
+                    server_card = Panel(
+                        f"[bold #ffffff]Local Development Server is Running in Background[/]\n\n"
+                        f"[bold #00ff66]Preview URL:[/] [bold #00d2ff underline]{preview_url}[/]\n\n"
+                        f"[dim #888888]Ally is monitoring live logs. Type /servers or /stopserver anytime.[/dim]",
+                        title="[bold #00ff66]● SERVER ONLINE[/]",
+                        border_style="#00ff66",
+                        padding=(1, 2),
+                    )
+                    log.write(server_card)
+
                 md_rendered = Markdown(full_reply, inline_code_lexer="text", code_theme="monokai")
                 panel = Panel(
                     md_rendered,
@@ -639,8 +668,10 @@ class AllyApp(App):
                     padding=(1, 2),
                 )
                 log.write(panel)
-            tree = self.query_one("#file-tree", WorkspaceTree)
-            tree.reload()
+
+            if modified_files:
+                tree = self.query_one("#file-tree", WorkspaceTree)
+                tree.reload()
             self._refresh_status()
         except Exception as e:
             error_card = format_clean_error(e, STATE.model)
@@ -663,6 +694,11 @@ class AllyApp(App):
 
         if cmd == "/help":
             self.action_show_help()
+        elif cmd == "/servers":
+            log.write(f"[#58a6ff]Active Servers:\n[/]{agent.tools.list_servers()}\n")
+        elif cmd == "/stopserver":
+            target_pid = int(arg) if arg.isdigit() else None
+            log.write(f"[#ffaa00]{agent.tools.stop_server(target_pid)}[/]\n")
         elif cmd == "/palette":
             self.action_open_palette()
         elif cmd == "/theme":
