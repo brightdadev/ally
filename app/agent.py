@@ -1,9 +1,11 @@
 """
-LLM Agent with smart direct-command bypass and real-time streaming.
+LLM Agent with autonomous execution and direct command permission bypass.
 Author: Bright da dev
 """
 import asyncio
+import json
 import os
+import re
 from pathlib import Path
 from google import genai
 from google.genai import types
@@ -16,28 +18,55 @@ from user.onboarding import load_profile
 
 WRITE_TOOLS = {"write_file", "patch_file", "delete_file", "run_command", "stop_server"}
 _PERSISTENT_CLIENT = None
+WHITELIST_FILE = Path(__file__).parent / "whitelist.json"
 
-DIRECT_ACTION_VERBS = (
-    "create", "make", "run", "do", "install", "build", "add", "write",
-    "delete", "remove", "setup", "start", "exec", "update", "patch", "fix",
-    "clean", "open", "mkdir", "touch"
-)
+DIRECT_ACTION_WORDS = {
+    "create", "make", "design", "build", "setup", "run", "do", "install",
+    "write", "add", "delete", "remove", "patch", "start", "exec", "open"
+}
 
 
-def is_direct_command(text: str) -> bool:
-    """Detects if user gave an explicit command where permission should be skipped."""
+def is_direct_order(text: str) -> bool:
+    """Detects if user prompt gives a direct directive where permission MUST be skipped."""
     clean = text.lower().strip()
     if clean.startswith("ally "):
         clean = clean[5:].strip()
 
-    if "run it" in clean or "do it" in clean or "just do it" in clean:
+    tokens = re.findall(r"\b[a-z]+\b", clean)
+    if any(token in DIRECT_ACTION_WORDS for token in tokens[:4]):
         return True
-
-    words = clean.split()
-    if words and words[0] in DIRECT_ACTION_VERBS:
+    if "run it" in clean or "do it" in clean:
         return True
-
     return False
+
+
+def load_whitelist() -> dict:
+    if not WHITELIST_FILE.is_file():
+        return {"exact_commands": [], "command_prefixes": []}
+    try:
+        return json.loads(WHITELIST_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"exact_commands": [], "command_prefixes": []}
+
+
+def is_safe_command(command: str) -> bool:
+    cmd = command.strip().lower()
+    whitelist = load_whitelist()
+    exacts = set(whitelist.get("exact_commands", []))
+    prefixes = tuple(whitelist.get("command_prefixes", []))
+
+    parts = [p.strip() for p in re.split(r"&&|;|\|\|", cmd) if p.strip()]
+    if not parts:
+        return False
+
+    def _check(part: str) -> bool:
+        if part in exacts:
+            return True
+        if part.startswith(prefixes):
+            return True
+        return False
+
+    return all(_check(p) for p in parts)
 
 
 class QuotaException(Exception):
@@ -99,7 +128,7 @@ def _system_prompt() -> str:
     parts = [
         _load_ground_rules(),
         f"OPERATIONAL STATE:\n- User: {STATE.username}\n- Mode: {STATE.mode}\n- Model: {STATE.model}\n- Active Key: #{STATE.active_key_index}\n- Project Root: {STATE.root}",
-        "DIRECTIVE: When the user gives a direct command to create, run, install, or write, execute the tool directly without unnecessary hesitation."
+        "DIRECTIVE: Work autonomously. Fulfill user coding, creation, and building tasks directly using tools without stopping for unnecessary permissions."
     ]
 
     brief_file = STATE.root / "project.md"
@@ -218,10 +247,10 @@ def dispatch(name: str, args: dict):
 async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step=None):
     current_input = user_text_or_parts
 
-    # Detect if user prompt was a direct imperative order
+    # Auto-detect if user prompt contains a direct task order
     skip_permission = False
     if isinstance(user_text_or_parts, str):
-        skip_permission = is_direct_command(user_text_or_parts)
+        skip_permission = is_direct_order(user_text_or_parts)
 
     while True:
         if on_step:
@@ -296,17 +325,22 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
             if on_step:
                 on_step(f"Executing: {name}")
 
-            # Smart Intent: If direct order OR auto mode, execute directly without asking!
+            # 1. AUTO MODE OR DIRECT TASK ORDER: EXECUTE IMMEDIATELY (ZERO POPUPS!)
             if STATE.mode == "auto" or skip_permission:
                 if on_step:
-                    on_step(f"Direct order: running {name}...")
+                    on_step(f"Auto-executing: {name}")
                 result = await asyncio.to_thread(dispatch, name, args)
 
+            # 2. WHITELIST INSPECTION: ALWAYS AUTO-EXECUTE (dir, node -v, git status)
+            elif name == "run_command" and is_safe_command(args.get("command", "")):
+                result = await asyncio.to_thread(dispatch, name, args)
+
+            # 3. PLAN MODE: Read-Only
             elif STATE.mode == "plan" and name in WRITE_TOOLS:
                 result = "BLOCKED: plan mode - read tools only."
 
+            # 4. ACCEPT MODE: Only ask if user gave no direct order
             elif STATE.mode == "accept" and name in WRITE_TOOLS:
-                # Speculative action not directly commanded by user -> ask for approval
                 if on_step:
                     on_step(f"Awaiting approval for {name}...")
                 approved = await request_approval(name, args)

@@ -1,6 +1,6 @@
 [project]
 name = "ally"
-version = "1.0.5"
+version = "1.0.6"
 description = "Terminal coding assistant powered by Gemini"
 authors = [
     { name = "Bright da dev" }

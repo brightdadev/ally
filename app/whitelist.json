@@ -1,0 +1,22 @@
+{
+  "description": "Safe read-only commands that execute autonomously with zero permission prompts.",
+  "exact_commands": [
+    "dir", "ls", "pwd", "cd",
+    "node -v", "node --version",
+    "npm -v", "npm --version",
+    "npx -v", "npx --version",
+    "python --version", "python -v", "py --version", "py -v",
+    "git status", "git branch", "git log", "git diff", "git remote -v",
+    "cargo --version", "rustc --version", "go version",
+    "tsc -v", "tsc --version", "tsc --noemit",
+    "docker -v", "docker --version",
+    "whoami", "hostname", "ver"
+  ],
+  "command_prefixes": [
+    "dir ", "ls ", "pwd",
+    "where ", "which ", "type ", "cat ", "echo ",
+    "git status", "git branch", "git log", "git diff", "git show ",
+    "npm list", "npm view ", "pip list", "pip show ",
+    "cargo check", "tsc --noemit"
+  ]
+}

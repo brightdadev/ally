@@ -1,5 +1,5 @@
 """
-Pitch-Black Terminal IDE with Zero-Collision Layout & ANSI SGR Sanitization.
+Pitch-Black Terminal IDE with Zero Mouse Tracking Spam.
 Author: Bright da dev
 """
 import asyncio
@@ -98,7 +98,9 @@ NATIVE_THEMES = {
 }
 
 PREVIEW_URL_REGEX = re.compile(r"PREVIEW URL:\s*(https?://[^\s]+)", re.IGNORECASE)
-ANSI_ESCAPE_FILTER = re.compile(r"\^?\[\[?<\d+;\d+;\d+[Mm]?|[\x1b\x00-\x1f]")
+
+# Filter any raw SGR mouse escape sequences from text input
+SGR_FILTER_REGEX = re.compile(r"(\[?<\d+;\d+;\d+[Mm]|\b\d+;\d+;\d+[Mm]|\b\d+[Mm]\b|\^\[\[?<\d+;\d+;\d+[Mm]?|[\x1b\x00-\x1f])")
 
 WINDOWS_JUNCTIONS_AND_NOISE = {
     ".git", "__pycache__", ".venv", "venv", ".egg-info", "dist", "build",
@@ -158,9 +160,9 @@ def format_clean_error(err: Exception, current_model: str) -> Panel:
 
 
 class CleanInput(Input):
-    """Input widget that sanitizes raw terminal SGR mouse escape sequences."""
+    """Input widget with strict SGR mouse escape code filtering."""
     def insert_text_at_cursor(self, text: str) -> None:
-        clean = ANSI_ESCAPE_FILTER.sub("", text)
+        clean = SGR_FILTER_REGEX.sub("", text)
         if clean:
             super().insert_text_at_cursor(clean)
 
@@ -172,7 +174,7 @@ class WorkspaceTree(DirectoryTree):
 
 class AllyApp(App):
     TITLE = "Ally"
-    SUB_TITLE = "Terminal IDE"
+    SUB_TITLE = "Terminal IDE v1.0.6"
 
     CSS = """
     Screen {
@@ -348,6 +350,10 @@ class AllyApp(App):
         self._busy = False
         self.accent_theme = "purple"
 
+    def _start_mouse_tracking(self) -> None:
+        """PERMANENTLY DISABLE SGR MOUSE TRACKING IN WINDOWS TERMINAL."""
+        pass
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Horizontal(id="ide-layout"):
@@ -358,10 +364,10 @@ class AllyApp(App):
                 with Horizontal(id="top-breadcrumbs"):
                     yield Static("[bold #00ff66][ready][/]", id="badge-status", classes="badge-pill")
                     yield Static(f"model: [bold #ffffff]{STATE.model}[/]", id="badge-model", classes="badge-pill")
-                    yield Static(f"mode: [bold #cccccc]{STATE.mode}[/]", id="badge-mode", classes="badge-pill")
-                    yield Static(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]", id="badge-key", classes="badge-pill")
-                    yield Static(f"theme: [bold]{self.accent_theme}[/]", id="badge-theme", classes="badge-pill")
-                    yield Static(f"root: [dim #555555]{STATE.root.name}[/]", id="badge-root", classes="badge-pill")
+                    yield Static(f"mode: [bold #00ff66]{STATE.mode}[/]", id="badge-mode", classes="badge-pill")
+                    yield Static(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]", id="badge-key", classes="badge-pill"),
+                    yield Static(f"theme: [bold]{self.accent_theme}[/]", id="badge-theme", classes="badge-pill"),
+                    yield Static(f"root: [dim #555555]{STATE.root.name}[/]", id="badge-root", classes="badge-pill"),
                 yield RichLog(id="log", wrap=True, markup=True)
                 with Horizontal(id="composer-container"):
                     yield CleanInput(placeholder="Ask Ally... (/help, F2 model, F4 stats, ^T palette, ^B explorer)", id="prompt")
@@ -374,6 +380,13 @@ class AllyApp(App):
         self.query_one("#prompt").focus()
         self.query_one("#log", RichLog).can_focus = False
         self.query_one("#process-log", RichLog).can_focus = False
+
+        # Kill mouse tracking on driver
+        if hasattr(self, "_driver") and hasattr(self._driver, "disable_mouse_support"):
+            try:
+                self._driver.disable_mouse_support()
+            except Exception:
+                pass
 
         for t_obj in NATIVE_THEMES.values():
             self.register_theme(t_obj)
@@ -420,7 +433,7 @@ class AllyApp(App):
 
     def _refresh_status(self):
         self.query_one("#badge-model", Static).update(f"model: [bold #ffffff]{STATE.model}[/]")
-        self.query_one("#badge-mode", Static).update(f"mode: [bold #cccccc]{STATE.mode}[/]")
+        self.query_one("#badge-mode", Static).update(f"mode: [bold #00ff66]{STATE.mode}[/]")
         self.query_one("#badge-key", Static).update(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]")
         self.query_one("#badge-theme", Static).update(f"theme: [bold]{self.accent_theme}[/]")
         self.query_one("#badge-root", Static).update(f"root: [dim #555555]{STATE.root.name}[/]")
