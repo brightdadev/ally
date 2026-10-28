@@ -296,7 +296,7 @@ class AllyApp(App):
         else:
             self._boot()
 
-    def _get_git_branch() -> str:
+    def _get_git_branch(self) -> str:
         try:
             r = subprocess.run(
                 ["git", "branch", "--show-current"],

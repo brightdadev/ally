@@ -1,5 +1,5 @@
 """
-LLM Agent with conversational consent, .allyignore defense, and friendly step updates.
+LLM Agent with parallel tool execution, persistent server defense, and zero-waste speed.
 Author: Bright da dev
 Version: 1.1.0
 """
@@ -124,9 +124,8 @@ def _system_prompt() -> str:
         "CRITICAL BEHAVIORAL DIRECTIVES:\n"
         f"1. ZERO ASSUMPTIONS: You must NEVER invent a project, tech stack, or feature on your own.\n"
         f"2. REQUIREMENT ALIGNMENT FIRST: When {username} asks to build, create, or design something new, you MUST engage in dialogue: ask what the vision is, what stack they prefer, and what requirements they have. Present a concise plan and ask for approval.\n"
-        f"3. NO UNPROMPTED WRITES: Do NOT call write_file or patch_file until {username} has explicitly approved your plan or specifically ordered you to write code.\n"
-        f"4. ZERO DISCOVERY WASTE: You already have the workspace overview above; do not call exploration tools for simple queries.\n"
-        f"5. SECURITY & SECRETS: Never attempt to read, write, or reveal files protected by .allyignore (like .env files, private keys, or passwords)."
+        f"3. NO PERSISTENT SERVERS: NEVER run 'npm run dev', 'next dev', or 'vite' with run_command. To check if a project is running, inspect the port with 'netstat -ano | findstr :3000' in under 1 second. Never freeze the app waiting for a web server.\n"
+        f"4. BATCH ACTIONS: Perform multiple file writes or commands in batches to minimize roundtrips."
     )
 
     return "\n\n---\n\n".join(parts)
@@ -169,11 +168,11 @@ def _compile_tool_definitions():
         ),
         types.FunctionDeclaration(
             name="run_command",
-            description="Execute a non-interactive shell command in the project root and inspect exit code, stdout, and stderr.",
+            description="Execute a non-interactive shell command in the project root and inspect exit code, stdout, and stderr. Do NOT run persistent dev servers.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
-                    "command": types.Schema(type=types.Type.STRING, description="Command to execute (e.g. pytest, npm test, python script.py)"),
+                    "command": types.Schema(type=types.Type.STRING, description="Command to execute (e.g. pytest, npm test, netstat -ano | findstr :3000)"),
                     "timeout": types.Schema(type=types.Type.INTEGER, description="Timeout in seconds (default: 30)"),
                 },
                 required=["command"],
@@ -214,7 +213,6 @@ def dispatch(name: str, args: dict):
 
 
 def _format_friendly_step(name: str, args: dict) -> str:
-    """Format tool actions into clean, friendly human phrasing."""
     if name == "read_file":
         return f"Ally is reading {args.get('path', 'file')}"
     if name == "write_file":
@@ -236,7 +234,7 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
 
     while True:
         if on_step:
-            on_step(f"Ally is thinking of a response...")
+            on_step("Ally is thinking of a response...")
 
         queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -268,7 +266,7 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
 
                 if "503" in err or "unavailable" in err:
                     if on_step:
-                        on_step("Google servers busy. Ally is retrying in 2s...")
+                        on_step("Google servers busy. Retrying in 2s...")
                     await asyncio.sleep(2)
                     return await run_turn(chat, user_text_or_parts, on_token, request_approval, on_step)
                 raise payload
@@ -302,8 +300,8 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
         if not accumulated_calls:
             break
 
-        parts = []
-        for call in accumulated_calls:
+        # Parallelize execution of multiple tool calls within the same turn
+        async def _exec_one(call):
             name = call.name
             args = dict(call.args or {})
 
@@ -313,8 +311,6 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
             if STATE.mode == "plan" and name in WRITE_TOOLS:
                 result = "BLOCKED: plan mode - read tools only."
             elif STATE.mode == "accept" and name in WRITE_TOOLS:
-                if on_step:
-                    on_step(f"Awaiting approval for {name}...")
                 approved = await request_approval(name, args)
                 if approved:
                     result = await asyncio.to_thread(dispatch, name, args)
@@ -323,11 +319,10 @@ async def run_turn(chat, user_text_or_parts, on_token, request_approval, on_step
             else:
                 result = await asyncio.to_thread(dispatch, name, args)
 
-            parts.append(
-                types.Part.from_function_response(name=name, response={"result": result})
-            )
+            return types.Part.from_function_response(name=name, response={"result": result})
 
-        current_input = parts
+        parts = await asyncio.gather(*[_exec_one(call) for call in accumulated_calls])
+        current_input = list(parts)
 
     if on_step:
         on_step("Ally is finished.")
