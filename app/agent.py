@@ -1,9 +1,11 @@
 """
-LLM Agent with dual-key rotation and token usage collection.
+LLM Agent with conversational consent guardrails, dual-key rotation, and zero assumptions.
 Author: Bright da dev
+Version: 1.1.0
 """
 import asyncio
 import os
+import subprocess
 from pathlib import Path
 from google import genai
 from google.genai import types
@@ -15,7 +17,7 @@ from context.memory import read_memory
 from user.onboarding import load_profile
 
 
-WRITE_TOOLS = {"write_file", "patch_file", "delete_file"}
+WRITE_TOOLS = {"write_file", "patch_file", "delete_file", "run_command"}
 _PERSISTENT_CLIENT = None
 
 
@@ -71,22 +73,60 @@ def _load_ground_rules() -> str:
             return rules_file.read_text(encoding="utf-8")
         except Exception:
             pass
-    return "You are Ally, a terminal coding assistant authored by Bright da dev."
+    return "You are Ally, a terminal engineering partner authored by Bright da dev."
+
+
+def _get_workspace_snapshot() -> str:
+    root = STATE.root.resolve()
+    ignored = {".git", "node_modules", "__pycache__", ".venv", "venv", ".egg-info", "dist", "build"}
+    try:
+        entries = sorted(root.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+        lines = [f"{'d' if e.is_dir() else 'f'} {e.name}" for e in entries if e.name not in ignored]
+        return "\n".join(lines[:45])
+    except Exception:
+        return "(empty or inaccessible)"
+
+
+def _get_git_branch() -> str:
+    try:
+        r = subprocess.run(["git", "branch", "--show-current"], cwd=str(STATE.root), capture_output=True, text=True, timeout=2)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return "not a git repo"
 
 
 def _system_prompt() -> str:
+    prof = load_profile()
+    username = prof.username or STATE.username or "bright"
+    role = getattr(prof, "role", "Lead Developer")
+    is_home_dir = STATE.root.resolve() == Path.home().resolve()
+
     parts = [
         _load_ground_rules(),
-        f"OPERATIONAL STATE:\n- User: {STATE.username}\n- Mode: {STATE.mode}\n- Model: {STATE.model}\n- Active Key: #{STATE.active_key_index}\n- Project Root: {STATE.root}",
+        f"PARTNER RELATIONSHIP:\n- Lead Developer: {username} ({role})\n- Workspace: {STATE.root.name} (Path: {STATE.root})\n- Git Branch: {_get_git_branch()}\n- Running in User Home: {is_home_dir}",
+        f"WORKSPACE OVERVIEW:\n{_get_workspace_snapshot()}",
     ]
 
     brief_file = STATE.root / "project.md"
     if brief_file.is_file():
-        parts.append("PROJECT BRIEF:\n" + brief_file.read_text(encoding="utf-8"))
+        try:
+            parts.append("PROJECT BRIEF:\n" + brief_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
 
     memory_content = read_memory(STATE.root)
     if memory_content:
         parts.append("PROJECT MEMORY:\n" + memory_content)
+
+    parts.append(
+        "CRITICAL BEHAVIORAL DIRECTIVES:\n"
+        f"1. ZERO ASSUMPTIONS: You must NEVER invent a project, tech stack, or feature on your own.\n"
+        f"2. REQUIREMENT ALIGNMENT FIRST: When {username} asks to build, create, or design something new, you MUST engage in dialogue: ask what the vision is, what stack they prefer, and what requirements they have. Present a concise plan and ask for approval.\n"
+        f"3. NO UNPROMPTED WRITES: Do NOT call write_file or patch_file until {username} has explicitly approved your plan or specifically ordered you to write code.\n"
+        f"4. ZERO DISCOVERY WASTE: You already have the workspace overview above; do not call exploration tools for simple queries."
+    )
 
     return "\n\n---\n\n".join(parts)
 
@@ -123,8 +163,20 @@ def _compile_tool_definitions():
         ),
         types.FunctionDeclaration(
             name="list_dir",
-            description="List directory entries.",
+            description="List directory entries for subdirectories not present in the top-level snapshot.",
             parameters=types.Schema(type=types.Type.OBJECT, properties={"path": types.Schema(type=types.Type.STRING)}),
+        ),
+        types.FunctionDeclaration(
+            name="run_command",
+            description="Execute a shell or terminal command in the project root and inspect exit code, stdout, and stderr.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "command": types.Schema(type=types.Type.STRING, description="Command to execute (e.g. pytest, npm test, python script.py)"),
+                    "timeout": types.Schema(type=types.Type.INTEGER, description="Timeout in seconds (default: 30)"),
+                },
+                required=["command"],
+            ),
         ),
     ]
     skill_tools = SKILLS.get_declarations()

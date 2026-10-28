@@ -1,9 +1,11 @@
 """
-Cleaned-Up Pitch-Black Terminal IDE for Ally.
+Cleaned-Up Pitch-Black Terminal IDE for Ally with Live Animated Thinking Indicator.
 Author: Bright da dev
+Version: 1.1.0
 """
 import asyncio
 import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -78,12 +80,12 @@ def format_clean_error(err: Exception, current_model: str) -> Panel:
         try:
             clean_msg = err_str.split("'message':")[1].split("',")[0].strip(" '\"")
         except Exception:
-            clean_msg = err_str[:140]
+            clean_msg = err_str[:160]
     else:
-        clean_msg = err_str[:140]
+        clean_msg = err_str[:160]
 
     body = f"[bold #ff4444]Error:[/] {clean_msg}"
-    return Panel(body, title="[#ff4444]Execution Error[/]", border_style="#331111", padding=(1, 2))
+    return Panel(body, title="[#ff4444]Execution Notice[/]", border_style="#331111", padding=(1, 2))
 
 
 class WorkspaceTree(DirectoryTree):
@@ -94,7 +96,7 @@ class WorkspaceTree(DirectoryTree):
 
 class AllyApp(App):
     TITLE = "Ally"
-    SUB_TITLE = "Terminal IDE"
+    SUB_TITLE = "Engineering Partner"
 
     CSS = """
     Screen {
@@ -136,7 +138,7 @@ class AllyApp(App):
         display: none;
     }
     #process-panel {
-        width: 36;
+        width: 38;
         background: #000000;
         border-left: solid #1a1a1a;
     }
@@ -185,6 +187,16 @@ class AllyApp(App):
         border: none;
         padding: 1 2;
     }
+    #thinking-indicator {
+        height: 1;
+        background: #000000;
+        color: #00ccff;
+        padding: 0 2;
+        display: none;
+    }
+    #thinking-indicator.active {
+        display: block;
+    }
     #composer-container {
         height: 3;
         background: #000000;
@@ -195,6 +207,9 @@ class AllyApp(App):
         background: #000000;
         border: none;
         color: #ffffff;
+    }
+    #prompt:focus {
+        border: none;
     }
     """
 
@@ -215,6 +230,8 @@ class AllyApp(App):
         self.chat = None
         self._approval_future = None
         self._busy = False
+        self._anim_timer = None
+        self._anim_frame = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -228,24 +245,25 @@ class AllyApp(App):
             # Center: Main Workspace
             Vertical(
                 Horizontal(
-                    Static("[bold #00ff66][ready][/]", id="badge-status", classes="badge-pill"),
+                    Static("[bold #00ffaa][ready][/]", id="badge-status", classes="badge-pill"),
                     Static(f"model: [bold #ffffff]{STATE.model}[/]", id="badge-model", classes="badge-pill"),
-                    Static(f"mode: [bold #cccccc]{STATE.mode}[/]", id="badge-mode", classes="badge-pill"),
+                    Static(f"mode: [bold #00ffaa]partner[/]", id="badge-mode", classes="badge-pill"),
                     Static(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]", id="badge-key", classes="badge-pill"),
-                    Static(f"root: [dim #555555]{STATE.root.name}[/]", id="badge-root", classes="badge-pill"),
+                    Static(f"root: [dim #888888]{STATE.root.name}[/]", id="badge-root", classes="badge-pill"),
                     id="top-breadcrumbs",
                 ),
-                RichLog(id="log", wrap=True, markup=True),
+                RichLog(id="log", wrap=True, highlight=False, markup=True),
+                Static("", id="thinking-indicator"),
                 Vertical(
-                    Input(placeholder="Ask Ally... (/help, F2 model, F4 stats, ^B explorer, ^P process)", id="prompt"),
+                    Input(placeholder="Talk with Ally as your engineering partner (or /help)...", id="prompt"),
                     id="composer-container",
                 ),
                 id="main-panel",
             ),
-            # Right: Process Log
+            # Right: Process Monitor
             Vertical(
-                Label("PROCESS", classes="panel-header"),
-                RichLog(id="process-log", wrap=True, markup=True),
+                Label("PROCESS MONITOR", classes="panel-header"),
+                RichLog(id="process-log", wrap=True, highlight=False, markup=True),
                 id="process-panel",
             ),
             id="ide-layout",
@@ -262,7 +280,7 @@ class AllyApp(App):
                 STATE.model = prof.default_model
             else:
                 STATE.model = ROUTER.get_default_model()
-            STATE.mode = prof.default_mode
+            STATE.mode = prof.default_mode or "auto"
             if prof.api_key_1 and not os.environ.get("GEMINI_API_KEY"):
                 os.environ["GEMINI_API_KEY"] = prof.api_key_1
             self._refresh_status()
@@ -274,6 +292,21 @@ class AllyApp(App):
         else:
             self._boot()
 
+    def _get_git_branch(self) -> str:
+        try:
+            r = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=str(STATE.root),
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except Exception:
+            pass
+        return ""
+
     def _boot(self):
         log = self.query_one("#log", RichLog)
         if not os.environ.get("GEMINI_API_KEY") and not agent.get_active_key():
@@ -282,18 +315,72 @@ class AllyApp(App):
         try:
             agent.reset_client()
             self.chat = agent.new_chat()
-            log.write(f"[bold #ffffff]Ally Terminal[/] [dim #555555]v1.0.4[/] · [dim #555555]model:[/] [bold #ffffff]{STATE.model}[/] · [dim #555555]root:[/] [bold #aaaaaa]{STATE.root.name}[/]")
-            log.write("[dim #444444]shortcuts: F2 model · F3 prep · F4 usage · Ctrl+K keys · Ctrl+B explorer · Ctrl+P process[/]\n")
+
+            branch = self._get_git_branch()
+            branch_str = f" [dim #555555]({branch})[/]" if branch else ""
+            mode_badge = "[bold #00ffaa]Autonomous Partner[/]" if STATE.mode == "auto" else f"[bold #aaaaaa]{STATE.mode}[/]"
+            key_info = f"Dual-Key (Active: #{STATE.active_key_index})"
+
+            welcome_body = (
+                f"[bold #ffffff]ALLY[/]  [dim #666666]v1.1.0 — Engineering Partner[/]\n\n"
+                f"  [dim #777777]Workspace:[/]   [bold #ffffff]{STATE.root.name}[/]{branch_str}\n"
+                f"  [dim #777777]Mode:[/]        {mode_badge} [dim #555555](collaborative first, zero unsolicited edits)[/]\n"
+                f"  [dim #777777]Model:[/]       [bold #ffffff]{STATE.model}[/] [dim #555555]•[/] [dim #888888]{key_info}[/]\n\n"
+                f"[dim #888888]Ready when you are. Tell me what we're building, or explore shortcuts:[/]\n"
+                f"[dim #555555]  F1[/] Guide   [dim #555555]F2[/] Models   [dim #555555]F4[/] Usage   [dim #555555]Ctrl+B[/] Files   [dim #555555]Ctrl+P[/] Processes"
+            )
+
+            welcome_card = Panel(
+                welcome_body,
+                title="[bold #ffffff] Welcome Home [/]",
+                border_style="#222222",
+                padding=(1, 3),
+            )
+            log.write(welcome_card)
+            log.write("\n")
             self._log_process(f"[active] {STATE.model}")
         except Exception as e:
             log.write(format_clean_error(e, STATE.model))
             self._log_process("[error] init failed")
 
     def _refresh_status(self):
+        mode_label = "[bold #00ffaa]partner[/]" if STATE.mode == "auto" else f"[bold #cccccc]{STATE.mode}[/]"
         self.query_one("#badge-model", Static).update(f"model: [bold #ffffff]{STATE.model}[/]")
-        self.query_one("#badge-mode", Static).update(f"mode: [bold #cccccc]{STATE.mode}[/]")
+        self.query_one("#badge-mode", Static).update(f"mode: {mode_label}")
         self.query_one("#badge-key", Static).update(f"key: [bold #aaaaaa]{STATE.active_key_index}/2[/]")
-        self.query_one("#badge-root", Static).update(f"root: [dim #555555]{STATE.root.name}[/]")
+        self.query_one("#badge-root", Static).update(f"root: [dim #888888]{STATE.root.name}[/]")
+
+    def _start_thinking_animation(self, label: str = "Ally is working"):
+        indicator = self.query_one("#thinking-indicator", Static)
+        indicator.add_class("active")
+        self._anim_frame = 0
+
+        frames = [
+            "[bold #00ffaa]●[/] [dim #444444]○ ○[/]",
+            "[dim #444444]○[/] [bold #00ccff]●[/] [dim #444444]○[/]",
+            "[dim #444444]○ ○[/] [bold #ffff00]●[/]",
+            "[dim #444444]○[/] [bold #00ccff]●[/] [dim #444444]○[/]",
+        ]
+
+        def _tick():
+            if not self._busy:
+                return
+            idx = self._anim_frame % len(frames)
+            indicator.update(f"{frames[idx]} [dim #888888]{label}...[/]")
+            self._anim_frame += 1
+
+        _tick()
+        if self._anim_timer:
+            self._anim_timer.stop()
+        self._anim_timer = self.set_interval(0.35, _tick)
+
+    def _stop_thinking_animation(self):
+        if self._anim_timer:
+            self._anim_timer.stop()
+            self._anim_timer = None
+        indicator = self.query_one("#thinking-indicator", Static)
+        indicator.remove_class("active")
+        indicator.update("")
 
     def _set_activity(self, state: str):
         badge = self.query_one("#badge-status", Static)
@@ -304,12 +391,12 @@ class AllyApp(App):
         elif state == "executing":
             badge.update("[bold #ffaa00][executing][/]")
         else:
-            badge.update("[bold #00ff66][ready][/]")
+            badge.update("[bold #00ffaa][ready][/]")
 
     def _log_process(self, message: str):
         plog = self.query_one("#process-log", RichLog)
         timestamp = datetime.now().strftime("%H:%M:%S")
-        clean_msg = message[:30] + ("..." if len(message) > 30 else "")
+        clean_msg = message[:34] + ("..." if len(message) > 34 else "")
         plog.write(f"[dim #555555]{timestamp}[/]  {clean_msg}")
 
     def action_toggle_sidebar(self):
@@ -322,7 +409,7 @@ class AllyApp(App):
         def _on_key_set(saved: bool):
             if saved:
                 log = self.query_one("#log", RichLog)
-                log.write("[bold #00ff66]API Keys configured successfully.[/]\n")
+                log.write("[bold #00ffaa]API Keys configured successfully.[/]\n")
                 self._log_process("[config] keys updated")
                 self._boot()
         self.push_screen(ApiKeyModal(), _on_key_set)
@@ -360,23 +447,23 @@ class AllyApp(App):
     def action_show_help(self):
         log = self.query_one("#log", RichLog)
         help_panel = Panel(
-            "[bold #ffffff]Command Palette & Keybindings:[/]\n\n"
+            "[bold #ffffff]Command Palette & Shortcuts:[/]\n\n"
             "  [bold #ffffff]F1[/]              Help guide\n"
             "  [bold #ffffff]F2[/]              Switch active model\n"
             "  [bold #ffffff]F3[/]              Project preparation wizard\n"
-            "  [bold #ffffff]F4[/]              Token usage & key statistics\n"
+            "  [bold #ffffff]F4[/]              Token usage & key analytics\n"
             "  [bold #ffffff]Ctrl+B[/]          Toggle project explorer\n"
             "  [bold #ffffff]Ctrl+P[/]          Toggle process monitor\n"
             "  [bold #ffffff]Ctrl+K[/]          Configure dual API keys\n"
             "  [bold #ffffff]Ctrl+O[/]          Developer profile settings\n"
             "  [bold #ffffff]Ctrl+Q[/]          Exit Ally\n\n"
+            "  /auto             Autonomous Partner mode (seamless execution)\n"
+            "  /plan             Read-only planning mode\n"
+            "  /accept           Prompt approval mode\n"
             "  /usage            View token analytics\n"
-            "  /key              Set Gemini API keys\n"
-            "  /model <name>     Switch model\n"
-            "  /plan             Set plan mode (read-only)\n"
-            "  /accept           Set accept mode (approval)\n"
-            "  /auto             Set auto mode (autonomous)\n"
-            "  /reset            Reset chat conversation",
+            "  /model <name>     Switch active model\n"
+            "  /reset            Reset chat conversation\n"
+            "  /quit             Exit Ally",
             title="[#555555]commands[/]",
             border_style="#1a1a1a",
             padding=(1, 2),
@@ -401,23 +488,10 @@ class AllyApp(App):
 
     async def request_approval(self, name: str, args: dict) -> bool:
         log = self.query_one("#log", RichLog)
-        path = args.get("path", "?")
-        if name == "write_file":
-            body = args.get("content", "")
-            preview = body[:600] + ("\n... (truncated)" if len(body) > 600 else "")
-            panel = Panel(preview, title=f"[#ffaa00]write:[/] {path}", border_style="#ffaa00")
-            log.write(panel)
-        elif name == "patch_file":
-            preview = f"--- OLD ---\n{args.get('old','')[:250]}\n--- NEW ---\n{args.get('new','')[:250]}"
-            panel = Panel(preview, title=f"[#ffaa00]patch:[/] {path}", border_style="#ffaa00")
-            log.write(panel)
-        elif name == "delete_file":
-            panel = Panel(f"Delete file: {path}", title="[#ff4444]delete[/]", border_style="#ff4444")
-            log.write(panel)
-        else:
-            log.write(f"[#ffaa00]{name}:[/] {args}")
-
-        log.write("[bold #ffaa00]Approve change? (y/n)[/]")
+        path = args.get("path", args.get("command", "?"))
+        panel = Panel(f"Action: {name}\nTarget: {path}", title="[#ffaa00]Approval Request[/]", border_style="#ffaa00")
+        log.write(panel)
+        log.write("[bold #ffaa00]Approve action? (y/n)[/]")
         self._approval_future = asyncio.get_running_loop().create_future()
         return await self._approval_future
 
@@ -441,7 +515,7 @@ class AllyApp(App):
             return
 
         if self._busy:
-            self.query_one("#log", RichLog).write("[#ffaa00]Ally is busy. Wait for current turn to complete.[/]\n")
+            self.query_one("#log", RichLog).write("[#ffaa00]Ally is busy working. Please wait for current turn to complete.[/]\n")
             return
 
         self._execute_turn_worker(text)
@@ -449,13 +523,13 @@ class AllyApp(App):
     @work(exclusive=True)
     async def _execute_turn_worker(self, text: str):
         log = self.query_one("#log", RichLog)
-        
-        # Clean terminal prompt line (no oversized box)
-        log.write(f"\n[dim #555555]you>[/] [bold #ffffff]{text}[/]")
-        self._log_process(f"[prompt] '{text[:18]}...'")
+
+        log.write(f"\n[bold #00ccff]you[/] [dim #555555]›[/] [bold #ffffff]{text}[/]\n")
+        self._log_process(f"[prompt] '{text[:22]}...'")
 
         self._busy = True
         self._set_activity("thinking")
+        self._start_thinking_animation("Ally is thinking")
 
         buffer = []
 
@@ -463,6 +537,12 @@ class AllyApp(App):
             buffer.append(chunk)
 
         def _on_step(step_name: str):
+            if "run_command" in step_name or "executing" in step_name.lower():
+                self._set_activity("executing")
+                self._start_thinking_animation("Executing command")
+            elif "calling" in step_name.lower():
+                self._set_activity("thinking")
+                self._start_thinking_animation("Synthesizing response")
             self._log_process(f"[step] {step_name}")
 
         try:
@@ -473,12 +553,13 @@ class AllyApp(App):
                 self.request_approval,
                 on_step=_on_step,
             )
+            self._stop_thinking_animation()
             full_reply = "".join(buffer)
             if full_reply:
                 md_rendered = Markdown(full_reply)
                 panel = Panel(
                     md_rendered,
-                    title=f"[dim #555555]ally ({STATE.model})[/]",
+                    title=f"[bold #ffffff]ally[/] [dim #555555]({STATE.model})[/]",
                     border_style="#1a1a1a",
                     padding=(1, 2),
                 )
@@ -487,6 +568,7 @@ class AllyApp(App):
             tree.reload()
             self._refresh_status()
         except Exception as e:
+            self._stop_thinking_animation()
             error_card = format_clean_error(e, STATE.model)
             log.write(error_card)
             self._log_process("[error] turn failed")
@@ -497,6 +579,7 @@ class AllyApp(App):
             except Exception:
                 pass
         finally:
+            self._stop_thinking_animation()
             self._busy = False
             self._set_activity("ready")
 
@@ -528,9 +611,10 @@ class AllyApp(App):
         elif cmd in ("/plan", "/accept", "/auto"):
             STATE.mode = cmd[1:]
             self._refresh_status()
-            log.write(f"[#00ff66]Mode updated to {STATE.mode}[/]\n")
+            log.write(f"[#00ffaa]Mode updated to {STATE.mode}[/]\n")
         elif cmd == "/status":
-            log.write(f"user: {STATE.username} | mode: {STATE.mode} | model: {STATE.model} | key: {STATE.active_key_index}/2 | root: {STATE.root.name}\n")
+            branch = self._get_git_branch()
+            log.write(f"user: {STATE.username} | mode: {STATE.mode} | model: {STATE.model} | branch: {branch or 'none'} | key: #{STATE.active_key_index}\n")
         elif cmd == "/reset":
             self._reset_chat("Session context reset.")
         elif cmd == "/quit":

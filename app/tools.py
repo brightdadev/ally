@@ -1,7 +1,10 @@
 """
-Filesystem tools for Ally with directory sandbox enforcement.
+Filesystem and terminal execution tools for Ally with sandbox and console isolation.
 Author: Bright da dev
+Version: 1.1.0
 """
+import sys
+import subprocess
 from pathlib import Path
 from app.state import STATE
 
@@ -70,3 +73,47 @@ def list_dir(path: str = ".") -> str:
         return "\n".join(f"{'d' if e.is_dir() else 'f'} {e.name}" for e in entries)
     except Exception as e:
         return f"ERROR: {e}"
+
+
+def run_command(command: str, timeout: int = 30) -> str:
+    """
+    Execute terminal command with strict console isolation.
+    Uses CREATE_NO_WINDOW and DEVNULL stdin to prevent console mode corruption and mouse escape leaks.
+    """
+    root = STATE.root.resolve()
+    creation_flags = 0
+    if sys.platform == "win32":
+        creation_flags = subprocess.CREATE_NO_WINDOW
+
+    try:
+        proc = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(root),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            creationflags=creation_flags,
+            timeout=max(1, min(timeout, 120)),
+        )
+        stdout = proc.stdout.strip()
+        stderr = proc.stderr.strip()
+        exit_code = proc.returncode
+
+        output_parts = [f"Exit Code: {exit_code}"]
+        if stdout:
+            if len(stdout) > 4000:
+                stdout = stdout[:4000] + "\n... [output truncated for brevity]"
+            output_parts.append(f"STDOUT:\n{stdout}")
+        if stderr:
+            if len(stderr) > 2000:
+                stderr = stderr[:2000] + "\n... [stderr truncated for brevity]"
+            output_parts.append(f"STDERR:\n{stderr}")
+        if not stdout and not stderr:
+            output_parts.append("(Command produced no console output)")
+
+        return "\n\n".join(output_parts)
+    except subprocess.TimeoutExpired:
+        return f"ERROR: Command timed out after {timeout} seconds."
+    except Exception as e:
+        return f"ERROR: Failed to execute command: {e}"
